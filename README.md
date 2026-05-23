@@ -1,5 +1,8 @@
-# MenoMate_core
-AI-powered menstrual wellness system with predictive analytics
+## 🏢 Organization Architecture
+
+Below is the high-level architecture of the **MenoMate** ecosystem, demonstrating how `menomate-web` sits alongside other repositories in the organization:
+
+```text
 ========================================================================
                          🏢 MENOMATE ORGANIZATION
 ========================================================================
@@ -15,3 +18,6 @@ AI-powered menstrual wellness system with predictive analytics
          ├─ TypeScript         ├─ TypeScript         ├─ FastAPI
          ├─ Tailwind v4        ├─ Expo / BLE         ├─ PostgreSQL
          └─ Vite               └─ Native Modules     └─ LangChain/CrewAI
+```
+
+---
