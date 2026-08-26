@@ -1,0 +1,42 @@
+import uuid
+from datetime import datetime, timezone
+from typing import List, TYPE_CHECKING
+from sqlalchemy import DateTime, Float, Integer
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.types import Uuid
+
+from app.db.base import Base
+
+if TYPE_CHECKING:
+    from app.models.cycle import Cycle
+    from app.models.daily_log import DailyLog
+    from app.models.therapy_session import TherapySession
+
+
+class Profile(Base):
+    __tablename__ = "profiles"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    cycle_length_avg: Mapped[int] = mapped_column(Integer, default=28, nullable=False)
+    period_length_avg: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+    sensitivity_index: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    cycles: Mapped[List["Cycle"]] = relationship(
+        "Cycle", back_populates="user", cascade="all, delete-orphan"
+    )
+    daily_logs: Mapped[List["DailyLog"]] = relationship(
+        "DailyLog", back_populates="user", cascade="all, delete-orphan"
+    )
+    therapy_sessions: Mapped[List["TherapySession"]] = relationship(
+        "TherapySession", back_populates="user", cascade="all, delete-orphan"
+    )
