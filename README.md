@@ -10,7 +10,7 @@ MenoMate is an integrated menstrual wellness platform designed to address dysmen
 - FastAPI backend (`menomate-core`): Central service responsible for authenticated business logic, cycle projection, daily logging, data aggregation, and safety-bound therapy policy calculation.
 - Supabase PostgreSQL: Managed relational database storing user profiles, cycle occurrences, daily symptom logs, device associations, therapy sessions, and conversation threads.
 - Supabase Auth: Secure user authentication issuing JSON Web Tokens (JWT) verified on every protected API endpoint.
-- Standalone ESP32 wearable: Hardware band with integrated heating elements, vibration actuators, and onboard thermal regulation.
+- Standalone ESP32 wearable: Planned hardware band with integrated heating elements, vibration actuators, and onboard thermal regulation.
 - BLE communication: Direct wireless link between the mobile handset and the wearable, keeping hardware control local and responsive.
 
 ## System Architecture
@@ -22,7 +22,7 @@ Flutter Mobile App (menomate-mobile)
        v
 FastAPI Backend (menomate-core)
        |
-       +---- Supabase Auth (JWT signature, expiration, audience verification)
+       +---- Supabase Auth (JWT signature, expiration, issuer, audience verification)
        |
        +---- Supabase PostgreSQL (User-scoped persistence)
        |
@@ -35,30 +35,30 @@ Flutter Mobile Handset
        |
        | Bluetooth Low Energy (BLE)
        v
-ESP32 Wearable Controller
+ESP32 Wearable Controller (Planned Hardware)
        |
        +---- Temperature Sensor (Continuous monitoring)
        +---- Heating Pad (PID-regulated thermal delivery)
        +---- Vibration Motors (Pulse and wave stimulation)
-       +---- Independent Hardware Thermal Cutoff (45.0 C fail-safe)
+       +---- Planned Independent Hardware Thermal Cutoff (45.0 C fail-safe)
 ```
 
 ### Safety Boundary
 
 The architecture enforces a strict separation between artificial intelligence and hardware actuation:
 - The AI layer is completely decoupled from hardware control. It has no access to GPIOs, PWM duty cycles, or heating element switches.
-- Therapy recommendations are computed exclusively by a deterministic policy engine that caps target temperatures at 44.0 degrees Celsius.
-- The ESP32 wearable runs an independent hardware-level safety loop that shuts down heating if temperature exceeds 45.0 degrees Celsius or if BLE heartbeat fails.
+- Therapy recommendations are computed exclusively by a deterministic policy engine in `menomate-core` that caps target temperatures at 44.0 degrees Celsius.
+- The external wearable specification defines an independent hardware-level safety loop in firmware that shuts down heating if temperature exceeds 45.0 degrees Celsius or if BLE heartbeat fails.
 
 ## Core Features
 
-- Supabase JWT Authentication: Validates token signature, expiration, audience (`authenticated`), and extracts UUID `sub`. Every protected query is explicitly scoped to the authenticated user ID.
+- Supabase JWT Authentication: Validates token signature (HS256 symmetric or RS256/ES256 JWKS asymmetric), expiration, issuer, audience (`authenticated`), and extracts UUID `sub`. Every protected query is explicitly scoped to the authenticated user ID.
 - Atomic Onboarding: Initializes user profile settings and optional baseline period record in a single transaction with idempotency safeguards.
 - Menstrual Cycle Tracking: Records period occurrences (`period_start`, `period_end`). Calculates cycle lengths using start-to-start biological math (`current_period_start - previous_period_start`).
 - Transparent Cycle Prediction: Weighted Moving Average (WMA) giving higher weight to recent completed cycles. Falls back to user-provided baseline or returns an explicit `insufficient_data` status with null dates rather than arbitrary estimates.
 - Phase Estimation: Four-phase menstrual cycle approximation (menstrual, follicular, ovulation, luteal) presented clearly as an educational estimate.
 - Relational Daily Wellness Logging: Records daily pain ratings (0 to 10), flow, mood, discharge, notes, and child symptom items validated against a controlled clinical taxonomy.
-- Partial Updates: PATCH endpoints respect explicit null values to allow clearing optional fields such as notes or mood.
+- Partial Updates: PATCH endpoints inspect `model_fields_set` to respect explicit null values, allowing users to clear optional fields such as notes or mood.
 - Home and History Analytics: Summaries providing cycle phase, days remaining, prediction confidence, variability standard deviation, and symptom frequency rankings.
 - Device Association: Links wearable hardware identifiers to user accounts with strict ownership checks.
 - Adaptive Therapy Policy: Maps reported pain levels to target temperatures and vibration modes, with an adaptive sensitivity index tuned by post-session user feedback.
@@ -92,8 +92,8 @@ All endpoints except `/health` and OpenAPI documentation require a valid Supabas
 ### Authentication & Profile
 - `GET /api/v1/auth/me`: Retrieve authenticated user identity and profile.
 - `GET /api/v1/profile`: Retrieve user profile settings.
-- `PATCH /api/v1/profile`: Update profile preferences, usual cycle days, or sensitivity index.
-- `DELETE /api/v1/profile`: Delete user application records (cascades across all user tables). Note: Auth user deletion requires Supabase Admin API.
+- `PATCH /api/v1/profile`: Update profile preferences, usual cycle lengths, or sensitivity index.
+- `DELETE /api/v1/profile`: Delete user application records (cascades across all user tables). Note: Supabase Auth user deletion requires Supabase Admin API credentials.
 
 ### Onboarding
 - `POST /api/v1/onboarding/complete`: Atomically create profile and optional initial period record.
@@ -141,7 +141,7 @@ All endpoints except `/health` and OpenAPI documentation require a valid Supabas
 
 1. Clone the repository and navigate to the project root:
    ```bash
-   git clone https://github.com/your-org/menomate-core.git
+   git clone <YOUR_GITHUB_REPOSITORY_URL>
    cd menomate-core
    ```
 
@@ -187,11 +187,11 @@ All endpoints except `/health` and OpenAPI documentation require a valid Supabas
 
 | Variable | Required | Description | Scope |
 |---|---|---|---|
+| `PROJECT_NAME` | No | Service name identifier (default `MenoMate Core Backend`) | Server-side only |
 | `DATABASE_URL` | Yes | PostgreSQL connection string (`postgresql+asyncpg://...`) | Server-side only |
-| `SUPABASE_JWT_SECRET` | Yes | Supabase JWT secret used to verify HS256 signatures | Server-side only |
-| `SUPABASE_URL` | Optional | Base URL of the Supabase project | Server-side only |
-| `SUPABASE_KEY` | Optional | Supabase anon key | Server-side only |
-| `ENVIRONMENT` | No | Runtime environment (`development`, `staging`, `production`) | Server-side only |
+| `SUPABASE_JWT_SECRET` | Yes | Supabase JWT secret used to verify symmetric HS256 signatures | Server-side only |
+| `SUPABASE_URL` | Yes | Base URL of the Supabase project (used for issuer and JWKS discovery) | Server-side only |
+| `ALLOWED_ORIGINS` | No | Allowed CORS origins (comma-separated list or `*`, default `*`) | Server-side only |
 | `AUTO_CREATE_TABLES` | No | Automatically run DDL on startup (default `false`) | Server-side only |
 
 Never expose `DATABASE_URL` or `SUPABASE_JWT_SECRET` to client applications.
@@ -237,17 +237,17 @@ Patient safety is fundamental to the MenoMate platform:
 
 - Temperature Ceiling: The backend recommendation engine enforces a strict mathematical ceiling of 44.0 degrees Celsius. Under no circumstances will a recommendation exceed this threshold.
 - Deterministic Policy: Thermal and vibration setpoints are produced through deterministic equations rather than opaque neural network outputs.
-- Independent Wearable Protection: The standalone ESP32 firmware incorporates hardware thermistor monitoring with a hard thermal cutoff at 45.0 degrees Celsius, independent of application software.
-- Activity Timeouts: Therapy sessions are time-bounded to prevent prolonged continuous exposure to heat.
+- Planned Wearable Protection: The external ESP32 wearable hardware specification specifies hardware thermistor monitoring with an independent thermal cutoff at 45.0 degrees Celsius, separate from application software.
+- Activity Timeouts: Therapy recommendations include duration limits to prevent prolonged continuous exposure to heat.
 - Data Ownership: All database queries enforce strict user scoping using validated JWT claims, preventing cross-user data leakage.
 
 ## Current Status
 
-- Implemented:
-  - Supabase JWT authentication with expiration and audience checks
-  - Cycle tracking engine with start-to-start cycle length math
-  - Weighted moving average prediction with fallback handling
-  - Relational daily wellness logging with validated symptoms taxonomy
+- Implemented in backend (`menomate-core`):
+  - Supabase JWT authentication supporting HS256 and asymmetric JWKS verification with expiration, issuer, audience, and UUID sub validation
+  - Cycle tracking engine with start-to-start cycle length math and period duration logic
+  - Weighted moving average prediction with fallback handling and null indicators on insufficient data
+  - Relational daily wellness logging with validated symptoms taxonomy and PATCH field clearing
   - Deterministic therapy recommendation engine with 44.0 C safety ceiling
   - Wearable device association and therapy session tracking
   - Modular AI care assistant with intent-tailored context and cautious phrasing
@@ -256,12 +256,12 @@ Patient safety is fundamental to the MenoMate platform:
 
 - In Progress:
   - Integration with the Flutter mobile client (`menomate-mobile`)
-  - End-to-end BLE communication validation with ESP32 prototype
+  - Verification of BLE communication protocols between mobile client and ESP32 wearable prototype
 
-- Planned:
+- Planned Hardware & Ecosystem Work:
+  - ESP32 hardware production and firmware verification
   - Long-term cycle regularity modeling
-  - Additional sensor telemetry processing (e.g. skin temperature trends)
-  - Production deployment pipeline
+  - Direct BLE diagnostic tools within the mobile client
 
 ## Mobile Application
 
@@ -272,11 +272,11 @@ The user-facing mobile client is developed as a separate project:
 
 ## Hardware
 
-The MenoMate physical device is a standalone wearable designed for abdominal or lumbar placement:
+The MenoMate physical device is a planned standalone wearable designed for abdominal or lumbar placement:
 - Microcontroller: ESP32 with integrated Bluetooth Low Energy
 - Thermal Module: Flexible heating element regulated via PWM
 - Actuation: Precision vibration motors for wave-based mechanical relief
-- Safety: Hardware thermistor with independent thermal interrupt at 45.0 degrees Celsius
+- Safety: Planned hardware thermistor with independent thermal interrupt at 45.0 degrees Celsius
 
 ## Future Work
 

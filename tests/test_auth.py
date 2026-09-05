@@ -53,6 +53,41 @@ async def test_auth_expired_token(async_client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_auth_invalid_audience(async_client: AsyncClient):
+    payload = {
+        "sub": str(TEST_USER_ID),
+        "aud": "unauthorized_audience",
+        "role": "authenticated",
+    }
+    bad_aud_token = jwt.encode(payload, settings.SUPABASE_JWT_SECRET, algorithm="HS256")
+
+    res = await async_client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {bad_aud_token}"},
+    )
+    assert res.status_code == 401
+    assert "Invalid token audience" in res.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_auth_invalid_issuer(async_client: AsyncClient):
+    payload = {
+        "sub": str(TEST_USER_ID),
+        "aud": "authenticated",
+        "iss": "https://malicious-issuer.com/auth/v1",
+        "role": "authenticated",
+    }
+    bad_iss_token = jwt.encode(payload, settings.SUPABASE_JWT_SECRET, algorithm="HS256")
+
+    res = await async_client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {bad_iss_token}"},
+    )
+    assert res.status_code == 401
+    assert "Invalid token issuer" in res.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_auth_valid_token_me(async_client: AsyncClient, auth_headers: dict):
     res = await async_client.get("/api/v1/auth/me", headers=auth_headers)
     assert res.status_code == 200
