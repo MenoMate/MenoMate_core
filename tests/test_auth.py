@@ -186,3 +186,42 @@ async def test_cross_user_profile_isolation(
     res2 = await async_client.get("/api/v1/profile", headers=other_user_auth_headers)
     assert res2.json()["name"] == "User Two"
     assert res2.json()["user_id"] == str(ANOTHER_USER_ID)
+
+
+@pytest.mark.asyncio
+async def test_profile_patch_null_semantics(async_client: AsyncClient, auth_headers: dict):
+    # 1. Populate baseline values
+    init_res = await async_client.patch(
+        "/api/v1/profile",
+        headers=auth_headers,
+        json={"name": "Aria", "usual_cycle_days": 28, "usual_period_days": 5},
+    )
+    assert init_res.status_code == 200
+    assert init_res.json()["name"] == "Aria"
+    assert init_res.json()["usual_cycle_days"] == 28
+    assert init_res.json()["usual_period_days"] == 5
+
+    # 2. Explicitly clear nullable values to None ("I'm not sure" state)
+    clear_res = await async_client.patch(
+        "/api/v1/profile",
+        headers=auth_headers,
+        json={"name": None, "usual_cycle_days": None, "usual_period_days": None},
+    )
+    assert clear_res.status_code == 200
+    cleared = clear_res.json()
+    assert cleared["name"] is None
+    assert cleared["usual_cycle_days"] is None
+    assert cleared["usual_period_days"] is None
+
+    # 3. Verify omitted fields remain unchanged (None) when updating theme
+    update_res = await async_client.patch(
+        "/api/v1/profile",
+        headers=auth_headers,
+        json={"theme": "dark"},
+    )
+    assert update_res.status_code == 200
+    data = update_res.json()
+    assert data["theme"] == "dark"
+    assert data["name"] is None
+    assert data["usual_cycle_days"] is None
+    assert data["usual_period_days"] is None

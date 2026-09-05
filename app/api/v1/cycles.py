@@ -34,7 +34,7 @@ def _to_cycle_response(cycle: Cycle) -> CycleResponse:
     )
 
 
-async def _check_cycle_overlap(
+async def check_cycle_overlap(
     db: AsyncSession,
     user_id: uuid.UUID,
     period_start: date,
@@ -128,7 +128,7 @@ async def create_cycle(
         await db.flush()
 
     # Overlapping period check
-    await _check_cycle_overlap(
+    await check_cycle_overlap(
         db=db,
         user_id=current_user_id,
         period_start=payload.period_start,
@@ -150,6 +150,7 @@ async def create_cycle(
     "/{cycle_id}",
     response_model=CycleResponse,
     summary="Update or close an ongoing period occurrence",
+    description="Updates a period record. Pass period_end=null explicitly in JSON to reopen an ongoing bleeding period.",
 )
 async def update_cycle(
     cycle_id: int,
@@ -167,17 +168,24 @@ async def update_cycle(
     if not cycle:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cycle period not found")
 
-    new_start = payload.period_start if payload.period_start is not None else cycle.period_start
-    new_end = payload.period_end if payload.period_end is not None else cycle.period_end
+    fields_set = payload.model_fields_set
+
+    new_start = payload.period_start if "period_start" in fields_set else cycle.period_start
+    new_end = payload.period_end if "period_end" in fields_set else cycle.period_end
 
     if new_end and new_end < new_start:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="period_end cannot be prior to period_start",
         )
+    if new_end and (new_end - new_start).days > 30:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="period duration cannot exceed 30 days",
+        )
 
     # Check overlap with other periods for this user
-    await _check_cycle_overlap(
+    await check_cycle_overlap(
         db=db,
         user_id=current_user_id,
         period_start=new_start,
@@ -185,9 +193,9 @@ async def update_cycle(
         exclude_cycle_id=cycle_id,
     )
 
-    if payload.period_start is not None:
+    if "period_start" in fields_set:
         cycle.period_start = payload.period_start
-    if payload.period_end is not None:
+    if "period_end" in fields_set:
         cycle.period_end = payload.period_end
 
     await db.commit()

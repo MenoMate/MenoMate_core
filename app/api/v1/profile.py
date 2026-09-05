@@ -39,6 +39,7 @@ async def get_profile(
     "",
     response_model=ProfileResponse,
     summary="Update user profile preferences and usual cycle lengths",
+    description="Updates user profile preferences. Explicitly passing null for usual_cycle_days, usual_period_days, or name clears those fields ('I am not sure' state).",
 )
 async def update_profile(
     payload: ProfileUpdate,
@@ -46,18 +47,19 @@ async def update_profile(
     db: AsyncSession = Depends(get_db),
 ) -> Profile:
     profile = await _get_or_create_profile(db, current_user_id)
+    fields_set = payload.model_fields_set
 
-    if payload.name is not None:
+    if "name" in fields_set:
         profile.name = payload.name
-    if payload.usual_cycle_days is not None:
+    if "usual_cycle_days" in fields_set:
         profile.usual_cycle_days = payload.usual_cycle_days
-    if payload.usual_period_days is not None:
+    if "usual_period_days" in fields_set:
         profile.usual_period_days = payload.usual_period_days
-    if payload.theme is not None:
+    if "theme" in fields_set and payload.theme is not None:
         profile.theme = payload.theme
-    if payload.units is not None:
+    if "units" in fields_set and payload.units is not None:
         profile.units = payload.units
-    if payload.sensitivity_index is not None:
+    if "sensitivity_index" in fields_set and payload.sensitivity_index is not None:
         profile.sensitivity_index = payload.sensitivity_index
 
     await db.commit()

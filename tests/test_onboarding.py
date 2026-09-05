@@ -66,3 +66,65 @@ async def test_onboarding_idempotency_safe_repeated(async_client: AsyncClient, a
     p2_id = res2.json()["period_id"]
 
     assert p1_id == p2_id  # Reused existing period without creating duplicate
+
+
+@pytest.mark.asyncio
+async def test_onboarding_cycle_validation_parity_and_overlap(async_client: AsyncClient, auth_headers: dict):
+    # 1. period_end before period_start -> 422
+    res_inverted = await async_client.post(
+        "/api/v1/onboarding/complete",
+        headers=auth_headers,
+        json={
+            "name": "Validation Test",
+            "last_period_start": str(date.today() - timedelta(days=5)),
+            "last_period_end": str(date.today() - timedelta(days=7)),
+        },
+    )
+    assert res_inverted.status_code == 422
+
+    # 2. duration > 30 days -> 422
+    res_too_long = await async_client.post(
+        "/api/v1/onboarding/complete",
+        headers=auth_headers,
+        json={
+            "name": "Validation Test",
+            "last_period_start": str(date.today() - timedelta(days=40)),
+            "last_period_end": str(date.today() - timedelta(days=5)),
+        },
+    )
+    assert res_too_long.status_code == 422
+
+    # 3. future period_start (> tomorrow) -> 422
+    res_future = await async_client.post(
+        "/api/v1/onboarding/complete",
+        headers=auth_headers,
+        json={
+            "name": "Validation Test",
+            "last_period_start": str(date.today() + timedelta(days=10)),
+        },
+    )
+    assert res_future.status_code == 422
+
+    # 4. Overlapping periods with existing period -> 400
+    # First create a cycle directly
+    c_start = date(2026, 7, 1)
+    c_end = date(2026, 7, 5)
+    create_cycle = await async_client.post(
+        "/api/v1/cycles",
+        headers=auth_headers,
+        json={"period_start": str(c_start), "period_end": str(c_end)},
+    )
+    assert create_cycle.status_code == 201
+
+    # Attempt onboarding with overlapping period range
+    res_overlap = await async_client.post(
+        "/api/v1/onboarding/complete",
+        headers=auth_headers,
+        json={
+            "name": "Validation Test",
+            "last_period_start": str(date(2026, 7, 3)),
+            "last_period_end": str(date(2026, 7, 8)),
+        },
+    )
+    assert res_overlap.status_code == 400
+    assert "overlaps with existing period" in res_overlap.json()["detail"]

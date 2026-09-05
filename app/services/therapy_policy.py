@@ -89,8 +89,12 @@ def adjust_sensitivity(
     elif fb == "too_hot":
         new_val = max(MIN_SENSITIVITY_INDEX, current_sensitivity - 0.08)
         note = f"Decreased sensitivity index to {new_val:.2f} (-0.08) to prevent heat discomfort."
-    else:
+    elif fb == "just_right":
         new_val = current_sensitivity
         note = f"Sensitivity index maintained at {new_val:.2f}."
+    else:
+        raise ValueError(
+            f"Invalid feedback '{feedback}'. Must be one of: insufficient_relief, too_hot, just_right"
+        )
 
     return round(new_val, 2), note

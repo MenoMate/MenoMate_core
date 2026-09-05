@@ -83,7 +83,7 @@ The database is structured in PostgreSQL with foreign keys cascading from `profi
 - `symptom_logs`: Child records attached to `daily_logs` identifying specific symptoms and severity scores (0 to 10).
 - `devices`: BLE wearable hardware identifiers, paired firmware version, and connection timestamps.
 - `therapy_sessions`: Log of completed therapy sessions recording mode, applied temperature, vibration parameters, pre/post pain scores, and relief feedback.
-- `chat_conversations` and `chat_messages`: Multi-turn conversational care threads.
+- `chat_conversations` and `chat_messages`: Reserved database tables for planned multi-turn conversation persistence. Care assistance currently operates statelessly via `POST /api/v1/care/interactions`.
 
 ## API Endpoints
 
@@ -92,24 +92,24 @@ All endpoints except `/health` and OpenAPI documentation require a valid Supabas
 ### Authentication & Profile
 - `GET /api/v1/auth/me`: Retrieve authenticated user identity and profile.
 - `GET /api/v1/profile`: Retrieve user profile settings.
-- `PATCH /api/v1/profile`: Update profile preferences, usual cycle lengths, or sensitivity index.
+- `PATCH /api/v1/profile`: Update profile preferences, usual cycle lengths, or sensitivity index (pass null to reset unsure values).
 - `DELETE /api/v1/profile`: Delete user application records (cascades across all user tables). Note: Supabase Auth user deletion requires Supabase Admin API credentials.
 
 ### Onboarding
-- `POST /api/v1/onboarding/complete`: Atomically create profile and optional initial period record.
+- `POST /api/v1/onboarding/complete`: Atomically create profile and optional initial period record with cycle validation and idempotency safeguards.
 
 ### Cycles
 - `GET /api/v1/cycles/current`: Retrieve active cycle status, phase, bleeding flag, and next period prediction.
 - `GET /api/v1/cycles`: List all logged menstrual bleeding occurrences for the user.
-- `POST /api/v1/cycles`: Log a new period occurrence with overlap and future-date validation.
-- `PATCH /api/v1/cycles/{cycle_id}`: Update or close an ongoing period occurrence.
+- `POST /api/v1/cycles`: Log a new period occurrence with overlap, duration, and future-date validation.
+- `PATCH /api/v1/cycles/{cycle_id}`: Update or close an ongoing period occurrence (explicitly pass `period_end=null` to reopen).
 
 ### Daily Logs & Symptoms
 - `GET /api/v1/symptoms`: Static catalogue of supported symptom types and metadata.
 - `GET /api/v1/logs/{log_date}`: Retrieve daily log and child symptoms for a calendar date.
 - `GET /api/v1/logs`: Query daily logs within an optional start and end date range.
-- `POST /api/v1/logs`: Create or upsert a daily log entry with child symptoms.
-- `PATCH /api/v1/logs/{log_id}`: Partially update a daily log entry (supports clearing fields with null).
+- `POST /api/v1/logs`: Create or replace complete daily log for the date (full day upsert).
+- `PATCH /api/v1/logs/{log_id}`: Partially update a daily log entry (supports clearing optional fields with null).
 
 ### Analytics & Summary
 - `GET /api/v1/summary/current`: High-level dashboard summary metrics for the active cycle.
@@ -123,11 +123,11 @@ All endpoints except `/health` and OpenAPI documentation require a valid Supabas
 ### Therapy Controls
 - `POST /api/v1/therapy/recommend`: Compute deterministic thermal and vibration recommendations.
 - `GET /api/v1/therapy/sessions`: List past wearable therapy sessions for the user.
-- `POST /api/v1/therapy/sessions`: Record a completed therapy session.
-- `PATCH /api/v1/therapy/sessions/{session_id}`: Update post-session relief score and tune adaptive sensitivity.
+- `POST /api/v1/therapy/sessions`: Record a completed therapy session (validates device ownership and timestamps).
+- `PATCH /api/v1/therapy/sessions/{session_id}`: Update post-session relief score and tune adaptive sensitivity (single application).
 
 ### Care Assistant
-- `POST /api/v1/care/interactions`: Process care inquiries through deterministic rules or AI guidance.
+- `POST /api/v1/care/interactions`: Process care inquiries through deterministic rules or AI guidance (stateless).
 
 ## Local Development
 
@@ -244,15 +244,15 @@ Patient safety is fundamental to the MenoMate platform:
 ## Current Status
 
 - Implemented in backend (`menomate-core`):
-  - Supabase JWT authentication supporting HS256 and asymmetric JWKS verification with expiration, issuer, audience, and UUID sub validation
-  - Cycle tracking engine with start-to-start cycle length math and period duration logic
+  - Supabase JWT authentication supporting HS256 and asymmetric JWKS verification with expiration, issuer, audience (`authenticated`), and UUID `sub` validation
+  - Cycle tracking engine with start-to-start cycle length math, period duration limits, and explicit null reopening semantics
   - Weighted moving average prediction with fallback handling and null indicators on insufficient data
-  - Relational daily wellness logging with validated symptoms taxonomy and PATCH field clearing
-  - Deterministic therapy recommendation engine with 44.0 C safety ceiling
+  - Relational daily wellness logging with validated symptoms taxonomy, full day upsert, and PATCH field clearing
+  - Deterministic therapy recommendation engine with 44.0 C safety ceiling, device ownership verification, and single feedback application
   - Wearable device association and therapy session tracking
-  - Modular AI care assistant with intent-tailored context and cautious phrasing
+  - Stateless AI care assistant with intent-tailored context and cautious phrasing (ChatConversation/ChatMessage tables reserved for future multi-turn persistence)
   - Clean separation between fresh schema DDL and legacy migration scripts
-  - Comprehensive automated test suite (35 tests covering auth, cycles, logs, therapy, care)
+  - Comprehensive automated test suite (41 tests covering auth, cycles, logs, therapy, onboarding, care)
 
 - In Progress:
   - Integration with the Flutter mobile client (`menomate-mobile`)

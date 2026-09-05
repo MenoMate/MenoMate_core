@@ -87,7 +87,12 @@ async def query_logs(
     "/logs",
     response_model=DailyLogResponse,
     status_code=status.HTTP_200_OK,
-    summary="Create or update daily log and child symptoms in one transaction",
+    summary="Create or replace complete daily log (full day upsert)",
+    description=(
+        "Full replacement/upsert for the specified calendar date. Replaces pain score, mood, discharge, "
+        "flow, notes, and child symptoms completely. For partial field updates without overwriting unmentioned "
+        "fields, use PATCH /logs/{log_id} instead."
+    ),
 )
 async def upsert_daily_log(
     payload: DailyLogCreate,
@@ -140,6 +145,10 @@ async def upsert_daily_log(
     "/logs/{log_id}",
     response_model=DailyLogResponse,
     summary="Partially update a daily log entry",
+    description=(
+        "Partially updates an existing daily log entry. Only fields explicitly included in the request payload "
+        "are modified. Explicitly passing null clears the corresponding optional field."
+    ),
 )
 async def update_daily_log(
     log_id: int,

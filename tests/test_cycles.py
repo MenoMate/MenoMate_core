@@ -98,3 +98,50 @@ async def test_cross_user_cycle_isolation(
     res2 = await async_client.get("/api/v1/cycles", headers=other_user_auth_headers)
     assert res2.status_code == 200
     assert len(res2.json()) == 0
+
+
+@pytest.mark.asyncio
+async def test_patch_cycle_null_reopen_ongoing(async_client: AsyncClient, auth_headers: dict):
+    # 1. Create a closed period
+    start = date(2026, 6, 1)
+    end = date(2026, 6, 5)
+    create_res = await async_client.post(
+        "/api/v1/cycles",
+        headers=auth_headers,
+        json={"period_start": str(start), "period_end": str(end)},
+    )
+    assert create_res.status_code == 201
+    cycle_id = create_res.json()["id"]
+    assert create_res.json()["period_end"] == str(end)
+    assert create_res.json()["period_length_days"] == 5
+
+    # 2. PATCH with {"period_end": None} explicitly to reopen ongoing period
+    patch_res = await async_client.patch(
+        f"/api/v1/cycles/{cycle_id}",
+        headers=auth_headers,
+        json={"period_end": None},
+    )
+    assert patch_res.status_code == 200
+    patch_data = patch_res.json()
+    assert patch_data["period_end"] is None
+    assert patch_data["period_length_days"] is None  # Bleeding still ongoing
+
+    # 3. PATCH with omitted period_end (only period_start) should not alter period_end
+    patch_res2 = await async_client.patch(
+        f"/api/v1/cycles/{cycle_id}",
+        headers=auth_headers,
+        json={"period_start": str(date(2026, 6, 2))},
+    )
+    assert patch_res2.status_code == 200
+    assert patch_res2.json()["period_start"] == str(date(2026, 6, 2))
+    assert patch_res2.json()["period_end"] is None
+
+    # 4. Close it again
+    patch_res3 = await async_client.patch(
+        f"/api/v1/cycles/{cycle_id}",
+        headers=auth_headers,
+        json={"period_end": str(date(2026, 6, 6))},
+    )
+    assert patch_res3.status_code == 200
+    assert patch_res3.json()["period_end"] == str(date(2026, 6, 6))
+    assert patch_res3.json()["period_length_days"] == 5

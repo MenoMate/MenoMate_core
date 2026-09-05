@@ -4,22 +4,26 @@ from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
+def validate_period_dates(period_start: date, period_end: Optional[date] = None) -> None:
+    # Prevent future period start dates (allow +1 day for timezone variance)
+    tomorrow = date.today() + timedelta(days=1)
+    if period_start > tomorrow:
+        raise ValueError("period_start cannot be in the future")
+
+    if period_end is not None:
+        if period_end < period_start:
+            raise ValueError("period_end cannot be prior to period_start")
+        if (period_end - period_start).days > 30:
+            raise ValueError("period duration cannot exceed 30 days")
+
+
 class CycleCreate(BaseModel):
     period_start: date = Field(..., description="First day of period bleeding")
     period_end: Optional[date] = Field(default=None, description="Last day of period bleeding, or null if ongoing")
 
     @model_validator(mode="after")
     def validate_dates(self) -> "CycleCreate":
-        # Prevent future period start dates (allow +1 day for timezone variance)
-        tomorrow = date.today() + timedelta(days=1)
-        if self.period_start > tomorrow:
-            raise ValueError("period_start cannot be in the future")
-
-        if self.period_end:
-            if self.period_end < self.period_start:
-                raise ValueError("period_end cannot be prior to period_start")
-            if (self.period_end - self.period_start).days > 30:
-                raise ValueError("period duration cannot exceed 30 days")
+        validate_period_dates(self.period_start, self.period_end)
         return self
 
 

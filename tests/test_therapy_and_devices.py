@@ -130,3 +130,119 @@ async def test_therapy_session_and_feedback_tuning(async_client: AsyncClient, au
     prof_res = await async_client.get("/api/v1/profile", headers=auth_headers)
     assert prof_res.status_code == 200
     assert prof_res.json()["sensitivity_index"] == 1.05
+
+
+@pytest.mark.asyncio
+async def test_therapy_device_ownership(
+    async_client: AsyncClient, auth_headers: dict, other_user_auth_headers: dict
+):
+    # 1. User A creates Device A
+    dev_res = await async_client.post(
+        "/api/v1/devices",
+        headers=auth_headers,
+        json={"device_identifier": "AA:11:22:33:44:55", "name": "User A Band"},
+    )
+    assert dev_res.status_code == 201
+    device_a_id = dev_res.json()["id"]
+
+    # 2. User B attempts to create therapy session with Device A
+    bad_sess_res = await async_client.post(
+        "/api/v1/therapy/sessions",
+        headers=other_user_auth_headers,
+        json={
+            "device_id": device_a_id,
+            "mode": "standard",
+            "target_temperature_c": 38.0,
+        },
+    )
+    assert bad_sess_res.status_code == 400
+    assert "not owned by authenticated user" in bad_sess_res.json()["detail"]
+
+    # 3. Verify User B has 0 sessions created
+    user_b_sessions = await async_client.get("/api/v1/therapy/sessions", headers=other_user_auth_headers)
+    assert user_b_sessions.status_code == 200
+    assert len(user_b_sessions.json()) == 0
+
+
+@pytest.mark.asyncio
+async def test_therapy_feedback_no_double_application_and_controlled_values(
+    async_client: AsyncClient, auth_headers: dict
+):
+    # Reset profile sensitivity to 1.0
+    await async_client.patch("/api/v1/profile", headers=auth_headers, json={"sensitivity_index": 1.0})
+
+    # Create session with no initial feedback
+    s_res = await async_client.post(
+        "/api/v1/therapy/sessions",
+        headers=auth_headers,
+        json={"mode": "standard", "target_temperature_c": 39.0},
+    )
+    assert s_res.status_code == 201
+    s_id = s_res.json()["id"]
+
+    # First feedback PATCH -> bumps sensitivity to 1.05
+    p1 = await async_client.patch(
+        f"/api/v1/therapy/sessions/{s_id}",
+        headers=auth_headers,
+        json={"feedback": "insufficient_relief"},
+    )
+    assert p1.status_code == 200
+    prof1 = await async_client.get("/api/v1/profile", headers=auth_headers)
+    assert prof1.json()["sensitivity_index"] == 1.05
+
+    # Repeated feedback PATCH on the same session -> should NOT bump sensitivity again
+    p2 = await async_client.patch(
+        f"/api/v1/therapy/sessions/{s_id}",
+        headers=auth_headers,
+        json={"feedback": "insufficient_relief"},
+    )
+    assert p2.status_code == 200
+    prof2 = await async_client.get("/api/v1/profile", headers=auth_headers)
+    assert prof2.json()["sensitivity_index"] == 1.05  # Remains 1.05, not 1.10
+
+    # Invalid feedback string must be rejected with 422
+    p_invalid = await async_client.patch(
+        f"/api/v1/therapy/sessions/{s_id}",
+        headers=auth_headers,
+        json={"feedback": "unsupported_feedback_value"},
+    )
+    assert p_invalid.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_therapy_session_date_validation(async_client: AsyncClient, auth_headers: dict):
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc)
+
+    # 1. POST session with ended_at < started_at -> rejected with 422
+    bad_post = await async_client.post(
+        "/api/v1/therapy/sessions",
+        headers=auth_headers,
+        json={
+            "started_at": (now).isoformat(),
+            "ended_at": (now - timedelta(minutes=15)).isoformat(),
+            "mode": "standard",
+        },
+    )
+    assert bad_post.status_code == 422
+
+    # 2. Valid session creation
+    good_post = await async_client.post(
+        "/api/v1/therapy/sessions",
+        headers=auth_headers,
+        json={
+            "started_at": now.isoformat(),
+            "mode": "standard",
+        },
+    )
+    assert good_post.status_code == 201
+    s_id = good_post.json()["id"]
+
+    # 3. PATCH session with ended_at < started_at -> rejected with 400
+    bad_patch = await async_client.patch(
+        f"/api/v1/therapy/sessions/{s_id}",
+        headers=auth_headers,
+        json={"ended_at": (now - timedelta(minutes=10)).isoformat()},
+    )
+    assert bad_patch.status_code == 400
+    assert "ended_at cannot be prior to started_at" in bad_patch.json()["detail"]

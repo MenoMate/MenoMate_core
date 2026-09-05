@@ -1,7 +1,14 @@
+from datetime import datetime, timezone
+from enum import Enum
 import uuid
-from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class TherapyFeedbackEnum(str, Enum):
+    insufficient_relief = "insufficient_relief"
+    too_hot = "too_hot"
+    just_right = "just_right"
 
 
 class TherapyRecommendationRequest(BaseModel):
@@ -30,13 +37,22 @@ class TherapySessionCreate(BaseModel):
     vibration_mode: Optional[str] = Field(default="pulse", max_length=32)
     pain_before: Optional[int] = Field(default=None, ge=0, le=10)
     pain_after: Optional[int] = Field(default=None, ge=0, le=10)
-    feedback: Optional[str] = Field(default=None, max_length=64)
+    feedback: Optional[TherapyFeedbackEnum] = None
+
+    @model_validator(mode="after")
+    def validate_session_dates(self) -> "TherapySessionCreate":
+        if self.started_at and self.ended_at:
+            s = self.started_at if self.started_at.tzinfo is not None else self.started_at.replace(tzinfo=timezone.utc)
+            e = self.ended_at if self.ended_at.tzinfo is not None else self.ended_at.replace(tzinfo=timezone.utc)
+            if e < s:
+                raise ValueError("ended_at cannot be prior to started_at")
+        return self
 
 
 class TherapySessionUpdate(BaseModel):
     ended_at: Optional[datetime] = None
     pain_after: Optional[int] = Field(default=None, ge=0, le=10)
-    feedback: Optional[str] = Field(default=None, max_length=64)
+    feedback: Optional[TherapyFeedbackEnum] = None
 
 
 class TherapySessionResponse(BaseModel):

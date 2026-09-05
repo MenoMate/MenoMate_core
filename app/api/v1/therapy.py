@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import get_current_user
 from app.db.session import get_db
 from app.models.daily_log import DailyLog
+from app.models.device import Device
 from app.models.profile import Profile
 from app.models.therapy_session import TherapySession
 from app.schemas.therapy import (
@@ -23,6 +24,12 @@ from app.services.therapy_policy import (
 )
 
 router = APIRouter(prefix="/therapy", tags=["Therapy Controls"])
+
+
+def _normalize_dt(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 async def _get_or_create_profile(db: AsyncSession, user_id: uuid.UUID) -> Profile:
@@ -101,10 +108,34 @@ async def log_therapy_session(
 ) -> TherapySession:
     profile = await _get_or_create_profile(db, current_user_id)
 
+    # 1. Device ownership check
+    if payload.device_id is not None:
+        device_stmt = select(Device).where(
+            Device.id == payload.device_id,
+            Device.user_id == current_user_id,
+        )
+        device_res = await db.execute(device_stmt)
+        device = device_res.scalar_one_or_none()
+        if not device:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Device not found or not owned by authenticated user",
+            )
+
+    # 2. Therapy session date validation
+    started_at = payload.started_at or datetime.now(timezone.utc)
+    if payload.ended_at and _normalize_dt(payload.ended_at) < _normalize_dt(started_at):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ended_at cannot be prior to started_at",
+        )
+
+    fb_val = payload.feedback.value if payload.feedback else None
+
     session = TherapySession(
         user_id=current_user_id,
         device_id=payload.device_id,
-        started_at=payload.started_at or datetime.now(timezone.utc),
+        started_at=started_at,
         ended_at=payload.ended_at,
         mode=payload.mode,
         target_temperature_c=payload.target_temperature_c,
@@ -112,13 +143,13 @@ async def log_therapy_session(
         vibration_mode=payload.vibration_mode,
         pain_before=payload.pain_before,
         pain_after=payload.pain_after,
-        feedback=payload.feedback,
+        feedback=fb_val,
     )
     db.add(session)
 
     # Adjust sensitivity if feedback was provided
-    if payload.feedback:
-        new_sens, _ = adjust_sensitivity(profile.sensitivity_index, payload.feedback)
+    if fb_val:
+        new_sens, _ = adjust_sensitivity(profile.sensitivity_index, fb_val)
         profile.sensitivity_index = new_sens
 
     await db.commit()
@@ -130,6 +161,7 @@ async def log_therapy_session(
     "/sessions/{session_id}",
     response_model=TherapySessionResponse,
     summary="Update therapy session feedback and tune adaptive sensitivity index",
+    description="Updates therapy session feedback and tunes sensitivity index once. Subsequent feedback edits update the record without repeated sensitivity adjustment.",
 )
 async def update_therapy_session(
     session_id: int,
@@ -148,14 +180,24 @@ async def update_therapy_session(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Therapy session not found")
 
     if payload.ended_at is not None:
+        if session.started_at and _normalize_dt(payload.ended_at) < _normalize_dt(session.started_at):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="ended_at cannot be prior to started_at",
+            )
         session.ended_at = payload.ended_at
+
     if payload.pain_after is not None:
         session.pain_after = payload.pain_after
+
     if payload.feedback is not None:
-        session.feedback = payload.feedback
-        profile = await _get_or_create_profile(db, current_user_id)
-        new_sens, _ = adjust_sensitivity(profile.sensitivity_index, payload.feedback)
-        profile.sensitivity_index = new_sens
+        fb_val = payload.feedback.value if hasattr(payload.feedback, "value") else str(payload.feedback)
+        # Prevent double-application: only adjust sensitivity if this session had no feedback set yet
+        if session.feedback is None:
+            profile = await _get_or_create_profile(db, current_user_id)
+            new_sens, _ = adjust_sensitivity(profile.sensitivity_index, fb_val)
+            profile.sensitivity_index = new_sens
+        session.feedback = fb_val
 
     await db.commit()
     await db.refresh(session)

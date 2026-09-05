@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.cycles import check_cycle_overlap
 from app.core.security import get_current_user
 from app.db.session import get_db
 from app.models.cycle import Cycle
@@ -43,13 +44,22 @@ async def complete_onboarding(
         profile.usual_cycle_days = payload.usual_cycle_days
         profile.usual_period_days = payload.usual_period_days
 
-    # 2. Check if cycle starting on this date already exists to prevent duplicate
+    # 2. Check if cycle starting on this date already exists to preserve idempotency
     cycle_stmt = select(Cycle).where(
         Cycle.user_id == current_user_id,
         Cycle.period_start == payload.last_period_start,
     )
     cycle_res = await db.execute(cycle_stmt)
     existing_cycle = cycle_res.scalar_one_or_none()
+
+    # 3. Check cycle overlap across user's existing periods (excluding identical cycle if re-onboarding)
+    await check_cycle_overlap(
+        db=db,
+        user_id=current_user_id,
+        period_start=payload.last_period_start,
+        period_end=payload.last_period_end,
+        exclude_cycle_id=existing_cycle.id if existing_cycle else None,
+    )
 
     if existing_cycle is None:
         first_cycle = Cycle(
