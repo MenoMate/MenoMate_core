@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime, timezone
 from typing import Optional, TYPE_CHECKING
-from sqlalchemy import Date, DateTime, ForeignKey, Integer
+from sqlalchemy import Date, DateTime, ForeignKey, Integer, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import Uuid
 
@@ -19,6 +19,9 @@ class Cycle(Base):
     Cycle length is measured start-to-start between consecutive periods.
     """
     __tablename__ = "cycles"
+    __table_args__ = (
+        UniqueConstraint("user_id", "period_start", name="uq_cycle_user_period_start"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[uuid.UUID] = mapped_column(

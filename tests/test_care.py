@@ -60,7 +60,7 @@ async def test_care_personalized_inquiry_mock_ai(async_client: AsyncClient, auth
     )
     assert res.status_code == 200
     data = res.json()
-    assert data["is_ai_generated"] is True
+    assert data["is_ai_generated"] is False  # Truthful: MockAIProvider is rule-based mock
     assert "cramp" in data["response_text"].lower() or "heat" in data["response_text"].lower()
     assert "disclaimer" in data
     assert len(data["suggested_actions"]) > 0
@@ -89,7 +89,7 @@ async def test_care_symptom_insight(async_client: AsyncClient, auth_headers: dic
     assert res.status_code == 200
     data = res.json()
     assert data["intent"] == "symptom_insight"
-    assert data["is_ai_generated"] is True
+    assert data["is_ai_generated"] is False
     assert "disclaimer" in data
 
 
@@ -104,4 +104,54 @@ async def test_care_default_intent_is_wellness_help(async_client: AsyncClient, a
     assert res.status_code == 200
     data = res.json()
     assert data["intent"] == "wellness_help"
-    assert data["is_ai_generated"] is True
+    assert data["is_ai_generated"] is False
+
+
+@pytest.mark.asyncio
+async def test_care_red_flag_emergency_triage(async_client: AsyncClient, auth_headers: dict):
+    # 1. Test unbearable pain / fainting
+    res1 = await async_client.post(
+        "/api/v1/care/interactions",
+        headers=auth_headers,
+        json={"intent": "pain_help", "user_message": "I have unbearable pain and fainted earlier today"},
+    )
+    assert res1.status_code == 200
+    d1 = res1.json()
+    assert d1["is_ai_generated"] is False
+    assert "URGENT CLINICAL SAFETY ADVISORY" in d1["response_text"]
+    assert "Seek Emergency Care" in d1["suggested_actions"]
+
+    # 2. Test heavy bleeding / hemorrhaging
+    res2 = await async_client.post(
+        "/api/v1/care/interactions",
+        headers=auth_headers,
+        json={"intent": "wellness_help", "user_message": "Experiencing heavy bleeding and soaking a pad every 30 minutes"},
+    )
+    assert res2.status_code == 200
+    d2 = res2.json()
+    assert d2["is_ai_generated"] is False
+    assert "URGENT CLINICAL SAFETY ADVISORY" in d2["response_text"]
+
+
+@pytest.mark.asyncio
+async def test_care_explicit_intent_priority_over_keyword_inference(async_client: AsyncClient, auth_headers: dict):
+    # When intent is explicitly "wellness_help", mentioning "when is my next period" should NOT hijack into cycle_insight
+    res = await async_client.post(
+        "/api/v1/care/interactions",
+        headers=auth_headers,
+        json={"intent": "wellness_help", "user_message": "When is my next period? I feel tired."},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["intent"] == "wellness_help"
+
+
+@pytest.mark.asyncio
+async def test_care_rejects_invalid_intent_enum(async_client: AsyncClient, auth_headers: dict):
+    # Invalid intent value outside CareIntentEnum must return 422
+    res = await async_client.post(
+        "/api/v1/care/interactions",
+        headers=auth_headers,
+        json={"intent": "unsupported_chat_intent", "user_message": "Hello"},
+    )
+    assert res.status_code == 422

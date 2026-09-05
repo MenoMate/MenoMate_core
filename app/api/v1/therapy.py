@@ -88,7 +88,13 @@ async def list_therapy_sessions(
     "/sessions",
     response_model=TherapySessionResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Save a completed wearable therapy session",
+    summary="Record completed wearable therapy session telemetry",
+    description=(
+        "Records telemetry for a wearable therapy session that has already occurred locally on hardware. "
+        "This endpoint is strictly for historical and adaptive telemetry logging; it does NOT execute "
+        "real-time hardware commands. The mobile client obtains recommendations via /recommend, commands "
+        "the ESP32 via local BLE, and logs completed session metrics here."
+    ),
 )
 async def log_therapy_session(
     payload: TherapySessionCreate,
@@ -104,8 +110,7 @@ async def log_therapy_session(
             Device.user_id == current_user_id,
         )
         device_res = await db.execute(device_stmt)
-        device = device_res.scalar_one_or_none()
-        if not device:
+        if device_res.scalar_one_or_none() is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Device not found or not owned by authenticated user",
@@ -121,16 +126,22 @@ async def log_therapy_session(
         )
 
     fb_val = payload.feedback.value if payload.feedback else None
+    mode_val = payload.mode.value if hasattr(payload.mode, "value") else str(payload.mode)
+    vib_val = (
+        payload.vibration_mode.value
+        if payload.vibration_mode and hasattr(payload.vibration_mode, "value")
+        else (str(payload.vibration_mode) if payload.vibration_mode else None)
+    )
 
     session = TherapySession(
         user_id=current_user_id,
         device_id=payload.device_id,
         started_at=started_at,
         ended_at=ended_at,
-        mode=payload.mode,
+        mode=mode_val,
         target_temperature_c=payload.target_temperature_c,
         vibration_intensity=payload.vibration_intensity,
-        vibration_mode=payload.vibration_mode,
+        vibration_mode=vib_val,
         pain_before=payload.pain_before,
         pain_after=payload.pain_after,
         feedback=fb_val,

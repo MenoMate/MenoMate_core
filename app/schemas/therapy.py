@@ -11,6 +11,21 @@ class TherapyFeedbackEnum(str, Enum):
     just_right = "just_right"
 
 
+class TherapyModeEnum(str, Enum):
+    standard = "standard"
+    gentle = "gentle"
+    deep_heat = "deep_heat"
+    adaptive = "adaptive"
+    custom = "custom"
+
+
+class VibrationModeEnum(str, Enum):
+    pulse = "pulse"
+    wave = "wave"
+    continuous = "continuous"
+    off = "off"
+
+
 class TherapyRecommendationRequest(BaseModel):
     pain_score: Optional[int] = Field(
         default=None, ge=0, le=10, description="Optional override; defaults to today's logged pain"
@@ -20,7 +35,7 @@ class TherapyRecommendationRequest(BaseModel):
 class TherapyRecommendationResponse(BaseModel):
     pain_score: int
     target_temperature_c: float = Field(..., le=44.0, description="Strict 44.0°C policy ceiling")
-    vibration_mode: str
+    vibration_mode: VibrationModeEnum
     vibration_intensity: int = Field(..., ge=0, le=100)
     duration_minutes: int
     reasoning: str
@@ -31,10 +46,10 @@ class TherapySessionCreate(BaseModel):
     device_id: Optional[uuid.UUID] = None
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
-    mode: str = Field(default="standard", max_length=32)
+    mode: TherapyModeEnum = Field(default=TherapyModeEnum.standard, description="standard, gentle, deep_heat, or custom")
     target_temperature_c: Optional[float] = Field(default=None, ge=0.0, le=44.0)
     vibration_intensity: Optional[int] = Field(default=None, ge=0, le=100)
-    vibration_mode: Optional[str] = Field(default="pulse", max_length=32)
+    vibration_mode: Optional[VibrationModeEnum] = Field(default=VibrationModeEnum.pulse)
     pain_before: Optional[int] = Field(default=None, ge=0, le=10)
     pain_after: Optional[int] = Field(default=None, ge=0, le=10)
     feedback: Optional[TherapyFeedbackEnum] = None
@@ -75,10 +90,10 @@ class TherapySessionResponse(BaseModel):
     device_id: Optional[uuid.UUID] = None
     started_at: datetime
     ended_at: Optional[datetime] = None
-    mode: str
+    mode: TherapyModeEnum
     target_temperature_c: Optional[float] = None
     vibration_intensity: Optional[int] = None
-    vibration_mode: Optional[str] = None
+    vibration_mode: Optional[VibrationModeEnum] = None
     pain_before: Optional[int] = None
     pain_after: Optional[int] = None
     feedback: Optional[str] = None

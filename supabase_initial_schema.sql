@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS public.cycles (
     period_end DATE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT chk_period_dates CHECK (period_end IS NULL OR period_end >= period_start)
+    CONSTRAINT chk_period_dates CHECK (period_end IS NULL OR period_end >= period_start),
+    CONSTRAINT uq_cycle_user_period_start UNIQUE (user_id, period_start)
 );
 
 CREATE INDEX IF NOT EXISTS idx_cycles_user_start ON public.cycles(user_id, period_start);

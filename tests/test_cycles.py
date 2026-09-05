@@ -145,3 +145,47 @@ async def test_patch_cycle_null_reopen_ongoing(async_client: AsyncClient, auth_h
     assert patch_res3.status_code == 200
     assert patch_res3.json()["period_end"] == str(date(2026, 6, 6))
     assert patch_res3.json()["period_length_days"] == 5
+
+
+@pytest.mark.asyncio
+async def test_future_period_not_reported_as_bleeding_today(async_client: AsyncClient, other_user_auth_headers: dict):
+    # Use other_user to have a clean state without prior periods
+    tomorrow = date.today() + timedelta(days=1)
+
+    # 1. Log period starting tomorrow (allowed under +1 day timezone variance)
+    res = await async_client.post(
+        "/api/v1/cycles",
+        headers=other_user_auth_headers,
+        json={"period_start": str(tomorrow), "period_end": None},
+    )
+    assert res.status_code == 201
+
+    # 2. Check current summary
+    summary_res = await async_client.get("/api/v1/summary/current", headers=other_user_auth_headers)
+    assert summary_res.status_code == 200
+    data = summary_res.json()
+
+    # Must NOT report bleeding today!
+    assert data["is_bleeding"] is False
+    assert data["phase"] != "menstrual"
+    assert data["days_until_next_period"] == 1
+
+
+@pytest.mark.asyncio
+async def test_cycle_duplicate_period_start_rejected_with_409(async_client: AsyncClient, auth_headers: dict):
+    p_date = date(2025, 1, 10)
+    # 1. Create first period
+    r1 = await async_client.post(
+        "/api/v1/cycles",
+        headers=auth_headers,
+        json={"period_start": str(p_date), "period_end": str(p_date + timedelta(days=4))},
+    )
+    assert r1.status_code == 201
+
+    # 2. Attempt duplicate creation for same user on same period_start -> 409 Conflict
+    r2 = await async_client.post(
+        "/api/v1/cycles",
+        headers=auth_headers,
+        json={"period_start": str(p_date), "period_end": str(p_date + timedelta(days=5))},
+    )
+    assert r2.status_code in (409, 400)  # DB unique constraint or overlap check rejected with conflict

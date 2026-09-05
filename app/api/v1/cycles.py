@@ -3,6 +3,7 @@ from datetime import date
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import desc, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user
@@ -141,8 +142,15 @@ async def create_cycle(
         period_end=payload.period_end,
     )
     db.add(cycle)
-    await db.commit()
-    await db.refresh(cycle)
+    try:
+        await db.commit()
+        await db.refresh(cycle)
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A period starting on this date already exists for this user.",
+        )
     return _to_cycle_response(cycle)
 
 
@@ -198,6 +206,13 @@ async def update_cycle(
     if "period_end" in fields_set:
         cycle.period_end = payload.period_end
 
-    await db.commit()
-    await db.refresh(cycle)
+    try:
+        await db.commit()
+        await db.refresh(cycle)
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A period starting on this date already exists for this user.",
+        )
     return _to_cycle_response(cycle)

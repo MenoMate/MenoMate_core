@@ -92,7 +92,7 @@ All endpoints except `/health` and OpenAPI documentation require a valid Supabas
 ### Authentication & Profile
 - `GET /api/v1/auth/me`: Retrieve authenticated user identity and profile.
 - `GET /api/v1/profile`: Retrieve user profile settings.
-- `PATCH /api/v1/profile`: Update profile preferences, usual cycle lengths, or sensitivity index (pass null to reset unsure values).
+- `PATCH /api/v1/profile`: Update profile preferences and usual cycle lengths (pass null to reset unsure values; sensitivity index is managed strictly by the backend therapy adaptation engine).
 - `DELETE /api/v1/profile`: Delete user application records (cascades across all user tables). Note: Supabase Auth user deletion requires Supabase Admin API credentials.
 
 ### Onboarding
@@ -123,11 +123,11 @@ All endpoints except `/health` and OpenAPI documentation require a valid Supabas
 ### Therapy Controls
 - `POST /api/v1/therapy/recommend`: Compute deterministic thermal and vibration recommendations.
 - `GET /api/v1/therapy/sessions`: List past wearable therapy sessions for the user.
-- `POST /api/v1/therapy/sessions`: Record a completed therapy session (validates device ownership and timestamps).
-- `PATCH /api/v1/therapy/sessions/{session_id}`: Update post-session relief score and tune adaptive sensitivity (single application).
+- `POST /api/v1/therapy/sessions`: Record completed therapy session telemetry and patient relief scores (historical logging only; does not execute hardware commands).
+- `PATCH /api/v1/therapy/sessions/{session_id}`: Update post-session relief score and tune adaptive sensitivity (single application; immutable feedback).
 
 ### Care Assistant
-- `POST /api/v1/care/interactions`: Process care inquiries through deterministic rules or AI guidance (stateless).
+- `POST /api/v1/care/interactions`: Guided care assistant with deterministic red-flag emergency triage, structured intent routing (CareIntentEnum), and context-tailored guidance (stateless).
 
 ## Local Development
 
@@ -252,7 +252,7 @@ Patient safety is fundamental to the MenoMate platform:
   - Wearable device association and therapy session tracking
   - Stateless AI care assistant with intent-tailored context and cautious phrasing (ChatConversation/ChatMessage tables reserved for future multi-turn persistence)
   - Clean separation between fresh schema DDL and legacy migration scripts
-  - Comprehensive automated test suite (41 tests covering auth, cycles, logs, therapy, onboarding, care)
+  - Comprehensive automated test suite (57 tests covering auth, cycles, logs, therapy, onboarding, care, and emergency safety triage)
 
 - In Progress:
   - Integration with the Flutter mobile client (`menomate-mobile`)

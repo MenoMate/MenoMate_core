@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user
@@ -72,8 +73,15 @@ async def register_device(
         )
         db.add(device)
 
-    await db.commit()
-    await db.refresh(device)
+    try:
+        await db.commit()
+        await db.refresh(device)
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Device identifier is already registered to another user account.",
+        )
     return device
 
 

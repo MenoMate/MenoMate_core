@@ -55,6 +55,8 @@ async def get_current_cycle_summary(
             "current_cycle_day": None,
             "phase": "unknown",
             "is_bleeding": False,
+            "latest_period_start": None,
+            "latest_period_end": None,
             "predicted_cycle_length": None,
             "predicted_next_period": None,
             "days_until_next_period": None,
@@ -67,16 +69,8 @@ async def get_current_cycle_summary(
             "frequent_symptoms": [],
         }
 
-    latest_period = all_periods[-1]
-    is_bleeding = (latest_period.period_end is None) or (today <= latest_period.period_end)
-    current_cycle_day = max(1, (today - latest_period.period_start).days + 1)
-    
-    if predicted_length is not None:
-        predicted_next_period = latest_period.period_start + timedelta(days=predicted_length)
-        days_until_next_period = (predicted_next_period - today).days
-    else:
-        predicted_next_period = None
-        days_until_next_period = None
+    started_periods = [p for p in all_periods if p.period_start <= today]
+    future_periods = [p for p in all_periods if p.period_start > today]
 
     # Calculate average period length
     completed_periods = [p for p in all_periods if p.period_end]
@@ -86,12 +80,43 @@ async def get_current_cycle_summary(
     else:
         avg_period_len = usual_period or 5
 
-    phase = estimate_phase(
-        cycle_day=current_cycle_day,
-        cycle_length=predicted_length,
-        is_bleeding=is_bleeding,
-        period_length=avg_period_len,
-    )
+    if started_periods:
+        active_period = started_periods[-1]
+        is_bleeding = (active_period.period_end is None) or (today <= active_period.period_end)
+        current_cycle_day = (today - active_period.period_start).days + 1
+        latest_period_start = active_period.period_start
+        latest_period_end = active_period.period_end
+
+        if future_periods:
+            predicted_next_period = future_periods[0].period_start
+            days_until_next_period = (predicted_next_period - today).days
+            confidence = "high"
+            source = "user_logged"
+        elif predicted_length is not None:
+            predicted_next_period = active_period.period_start + timedelta(days=predicted_length)
+            days_until_next_period = (predicted_next_period - today).days
+        else:
+            predicted_next_period = None
+            days_until_next_period = None
+
+        phase = estimate_phase(
+            cycle_day=current_cycle_day,
+            cycle_length=predicted_length,
+            is_bleeding=is_bleeding,
+            period_length=avg_period_len,
+        )
+    else:
+        # Only future periods exist (e.g., period start logged for tomorrow)
+        first_future = future_periods[0]
+        is_bleeding = False
+        current_cycle_day = None
+        phase = "unknown"
+        latest_period_start = first_future.period_start
+        latest_period_end = first_future.period_end
+        predicted_next_period = first_future.period_start
+        days_until_next_period = (predicted_next_period - today).days
+        confidence = "high"
+        source = "user_logged"
 
     avg_cycle_len = round(sum(cycle_lengths) / len(cycle_lengths)) if cycle_lengths else (usual_cycle or None)
 
@@ -130,8 +155,8 @@ async def get_current_cycle_summary(
         "current_cycle_day": current_cycle_day,
         "phase": phase,
         "is_bleeding": is_bleeding,
-        "latest_period_start": latest_period.period_start,
-        "latest_period_end": latest_period.period_end,
+        "latest_period_start": latest_period_start,
+        "latest_period_end": latest_period_end,
         "predicted_cycle_length": predicted_length,
         "predicted_next_period": predicted_next_period,
         "days_until_next_period": days_until_next_period,

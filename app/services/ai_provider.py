@@ -6,6 +6,8 @@ class BaseAIProvider(ABC):
     """
     Abstract interface for MenoMate Care AI providers.
     """
+    is_real_ai: bool = False
+
     @abstractmethod
     async def generate_reply(
         self,
@@ -22,6 +24,7 @@ class MockAIProvider(BaseAIProvider):
     for development, testing, and offline environments.
     Strictly avoids clinical diagnoses or prescribing medication.
     """
+    is_real_ai: bool = False
     async def generate_reply(
         self,
         context: Dict[str, Any],

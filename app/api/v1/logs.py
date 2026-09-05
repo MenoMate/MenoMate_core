@@ -3,6 +3,7 @@ from datetime import date
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import desc, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -142,9 +143,25 @@ async def upsert_daily_log(
         daily_log.notes = payload.notes
         daily_log.symptoms = symptom_objects
 
-    await db.commit()
-    await db.refresh(daily_log, ["symptoms"])
-    return daily_log
+    try:
+        await db.commit()
+        await db.refresh(daily_log, ["symptoms"])
+        return daily_log
+    except IntegrityError:
+        await db.rollback()
+        res = await db.execute(stmt)
+        existing = res.scalar_one_or_none()
+        if existing:
+            existing.pain = payload.pain
+            existing.mood = payload.mood.value if payload.mood else None
+            existing.discharge = payload.discharge.value if payload.discharge else None
+            existing.flow = payload.flow.value if payload.flow else None
+            existing.notes = payload.notes
+            existing.symptoms = symptom_objects
+            await db.commit()
+            await db.refresh(existing, ["symptoms"])
+            return existing
+        raise
 
 
 @router.patch(
