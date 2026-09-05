@@ -48,10 +48,15 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
-def make_token(user_id: uuid.UUID = TEST_USER_ID, aud: str = "authenticated") -> str:
+def make_token(
+    user_id: uuid.UUID = TEST_USER_ID,
+    aud: str = "authenticated",
+    iss: str = "https://your-project-ref.supabase.co/auth/v1",
+) -> str:
     payload = {
         "sub": str(user_id),
         "aud": aud,
+        "iss": iss,
         "role": "authenticated",
         "email": "user@menomate.health",
     }

@@ -38,7 +38,7 @@ Flutter Mobile Handset
 ESP32 Wearable Controller (Planned Hardware)
        |
        +---- Temperature Sensor (Continuous monitoring)
-       +---- Heating Pad (PID-regulated thermal delivery)
+       +---- Heating Pad (Controlled thermal delivery)
        +---- Vibration Motors (Pulse and wave stimulation)
        +---- Planned Independent Hardware Thermal Cutoff (45.0 C fail-safe)
 ```
@@ -189,7 +189,7 @@ All endpoints except `/health` and OpenAPI documentation require a valid Supabas
 |---|---|---|---|
 | `PROJECT_NAME` | No | Service name identifier (default `MenoMate Core Backend`) | Server-side only |
 | `DATABASE_URL` | Yes | PostgreSQL connection string (`postgresql+asyncpg://...`) | Server-side only |
-| `SUPABASE_JWT_SECRET` | Yes | Supabase JWT secret used to verify symmetric HS256 signatures | Server-side only |
+| `SUPABASE_JWT_SECRET` | Yes | Supabase JWT secret used for legacy/symmetric HS256 verification when applicable | Server-side only |
 | `SUPABASE_URL` | Yes | Base URL of the Supabase project (used for issuer and JWKS discovery) | Server-side only |
 | `ALLOWED_ORIGINS` | No | Allowed CORS origins (comma-separated list or `*`, default `*`) | Server-side only |
 | `AUTO_CREATE_TABLES` | No | Automatically run DDL on startup (default `false`) | Server-side only |
@@ -252,7 +252,7 @@ Patient safety is fundamental to the MenoMate platform:
   - Wearable device association and therapy session tracking
   - Modular AI care assistant with intent-tailored context and cautious phrasing
   - Clean separation between fresh schema DDL and legacy migration scripts
-  - Comprehensive automated test suite (32 tests covering auth, cycles, logs, therapy, care)
+  - Comprehensive automated test suite (34 tests covering auth, cycles, logs, therapy, care)
 
 - In Progress:
   - Integration with the Flutter mobile client (`menomate-mobile`)

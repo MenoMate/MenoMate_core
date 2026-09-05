@@ -39,6 +39,7 @@ async def test_auth_expired_token(async_client: AsyncClient):
     payload = {
         "sub": str(TEST_USER_ID),
         "aud": "authenticated",
+        "iss": f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1",
         "role": "authenticated",
         "exp": int(past_exp.timestamp()),
     }
@@ -57,6 +58,7 @@ async def test_auth_invalid_audience(async_client: AsyncClient):
     payload = {
         "sub": str(TEST_USER_ID),
         "aud": "unauthorized_audience",
+        "iss": f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1",
         "role": "authenticated",
     }
     bad_aud_token = jwt.encode(payload, settings.SUPABASE_JWT_SECRET, algorithm="HS256")

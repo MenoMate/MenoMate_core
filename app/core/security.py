@@ -1,5 +1,5 @@
 import uuid
-from typing import Optional
+from typing import Optional, Set
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -8,14 +8,21 @@ from app.core.config import settings
 
 security_scheme = HTTPBearer(auto_error=True)
 
+SUPPORTED_ALGORITHMS: Set[str] = {"HS256", "RS256", "ES256"}
+
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
 ) -> uuid.UUID:
     """
     Extracts and validates Supabase JWT claims from Authorization header.
-    Validates token signature (HS256 symmetric or RS256/ES256 JWKS asymmetric),
-    expiration (exp), issuer (iss), audience (aud), and subject UUID (sub).
+    Strictly enforces:
+    - Explicit algorithm validation (rejects unsupported/unknown algorithms)
+    - Cryptographic signature check (symmetric HS256 or asymmetric RS256/ES256 via Supabase JWKS)
+    - Expiration (exp)
+    - Mandatory audience claim (aud == 'authenticated' or 'test')
+    - Mandatory issuer claim (iss == '{SUPABASE_URL}/auth/v1' or test issuers)
+    - Mandatory subject claim (sub as a valid UUID)
     Every protected database operation must scope queries by this returned user_id.
     """
     token = credentials.credentials
@@ -23,7 +30,14 @@ async def get_current_user(
     try:
         # Inspect unverified header to determine signing algorithm
         unverified_header = jwt.get_unverified_header(token)
-        alg = unverified_header.get("alg", "HS256")
+        alg = unverified_header.get("alg")
+
+        if not alg or alg not in SUPPORTED_ALGORITHMS:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Unsupported or missing token signing algorithm: {alg}",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
         if alg in ("RS256", "ES256"):
             # Asymmetric signing via Supabase JWKS
@@ -40,7 +54,7 @@ async def get_current_user(
                     "verify_aud": False,
                 },
             )
-        else:
+        elif alg == "HS256":
             # Symmetric signing via project SUPABASE_JWT_SECRET
             payload = jwt.decode(
                 token,
@@ -52,28 +66,45 @@ async def get_current_user(
                     "verify_aud": False,
                 },
             )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Unsupported token algorithm: {alg}",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
-        # 1. Audience validation
+        # 1. Require and validate audience claim
         aud = payload.get("aud")
-        if aud is not None and aud not in ("authenticated", "test"):
+        if not aud:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token missing audience claim",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        if aud not in ("authenticated", "test"):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token audience",
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        # 2. Issuer validation (if issuer claim is present)
+        # 2. Require and validate issuer claim
         iss = payload.get("iss")
-        if iss:
-            expected_iss = f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1"
-            if iss not in (expected_iss, "http://test", "supabase", "test"):
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid token issuer",
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
+        if not iss:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token missing issuer claim",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        expected_iss = f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1"
+        if iss not in (expected_iss, "http://test", "supabase", "test"):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token issuer",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
-        # 3. Subject UUID validation
+        # 3. Require and validate subject UUID claim
         user_id_str: Optional[str] = payload.get("sub")
         if not user_id_str:
             raise HTTPException(
