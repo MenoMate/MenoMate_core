@@ -20,8 +20,8 @@ async def get_current_user(
     - Explicit algorithm validation (rejects unsupported/unknown algorithms)
     - Cryptographic signature check (symmetric HS256 or asymmetric RS256/ES256 via Supabase JWKS)
     - Expiration (exp)
-    - Mandatory audience claim (aud == 'authenticated' or 'test')
-    - Mandatory issuer claim (iss == '{SUPABASE_URL}/auth/v1' or test issuers)
+    - Mandatory audience claim (aud must be exactly 'authenticated')
+    - Mandatory issuer claim (iss must be exactly '{SUPABASE_URL}/auth/v1')
     - Mandatory subject claim (sub as a valid UUID)
     Every protected database operation must scope queries by this returned user_id.
     """
@@ -73,7 +73,7 @@ async def get_current_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        # 1. Require and validate audience claim
+        # 1. Require and validate audience claim (must be exactly 'authenticated')
         aud = payload.get("aud")
         if not aud:
             raise HTTPException(
@@ -81,14 +81,14 @@ async def get_current_user(
                 detail="Token missing audience claim",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        if aud not in ("authenticated", "test"):
+        if aud != "authenticated":
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token audience",
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        # 2. Require and validate issuer claim
+        # 2. Require and validate issuer claim (must be exactly '{SUPABASE_URL}/auth/v1')
         iss = payload.get("iss")
         if not iss:
             raise HTTPException(
@@ -97,7 +97,7 @@ async def get_current_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
         expected_iss = f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1"
-        if iss not in (expected_iss, "http://test", "supabase", "test"):
+        if iss != expected_iss:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token issuer",

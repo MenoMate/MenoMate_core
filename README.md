@@ -252,7 +252,7 @@ Patient safety is fundamental to the MenoMate platform:
   - Wearable device association and therapy session tracking
   - Modular AI care assistant with intent-tailored context and cautious phrasing
   - Clean separation between fresh schema DDL and legacy migration scripts
-  - Comprehensive automated test suite (34 tests covering auth, cycles, logs, therapy, care)
+  - Comprehensive automated test suite (35 tests covering auth, cycles, logs, therapy, care)
 
 - In Progress:
   - Integration with the Flutter mobile client (`menomate-mobile`)

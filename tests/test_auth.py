@@ -90,6 +90,41 @@ async def test_auth_invalid_issuer(async_client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_auth_rejects_test_audience_and_test_issuer(async_client: AsyncClient):
+    expected_iss = f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1"
+
+    # 1. aud="test" must be rejected in production authentication
+    payload_bad_aud = {
+        "sub": str(TEST_USER_ID),
+        "aud": "test",
+        "iss": expected_iss,
+        "role": "authenticated",
+    }
+    token_bad_aud = jwt.encode(payload_bad_aud, settings.SUPABASE_JWT_SECRET, algorithm="HS256")
+    res_aud = await async_client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {token_bad_aud}"},
+    )
+    assert res_aud.status_code == 401
+    assert "Invalid token audience" in res_aud.json()["detail"]
+
+    # 2. iss="test" must be rejected in production authentication
+    payload_bad_iss = {
+        "sub": str(TEST_USER_ID),
+        "aud": "authenticated",
+        "iss": "test",
+        "role": "authenticated",
+    }
+    token_bad_iss = jwt.encode(payload_bad_iss, settings.SUPABASE_JWT_SECRET, algorithm="HS256")
+    res_iss = await async_client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {token_bad_iss}"},
+    )
+    assert res_iss.status_code == 401
+    assert "Invalid token issuer" in res_iss.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_auth_valid_token_me(async_client: AsyncClient, auth_headers: dict):
     res = await async_client.get("/api/v1/auth/me", headers=auth_headers)
     assert res.status_code == 200
