@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import desc, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user
@@ -13,23 +13,23 @@ from app.schemas.therapy import (
     TherapyRecommendationRequest,
     TherapyRecommendationResponse,
     TherapySessionCreate,
-    TherapySessionFeedbackUpdate,
     TherapySessionResponse,
+    TherapySessionUpdate,
 )
-from app.services.calibrator import (
-    adjust_sensitivity_on_feedback,
-    generate_recommendation,
+from app.services.therapy_policy import (
+    adjust_sensitivity,
+    calculate_therapy_recommendation,
 )
 
-router = APIRouter(prefix="/therapy", tags=["Therapy & Recommendation Engine"])
+router = APIRouter(prefix="/therapy", tags=["Therapy Controls"])
 
 
 async def _get_or_create_profile(db: AsyncSession, user_id: uuid.UUID) -> Profile:
-    stmt = select(Profile).where(Profile.id == user_id)
-    result = await db.execute(stmt)
-    profile = result.scalar_one_or_none()
-    if profile is None:
-        profile = Profile(id=user_id)
+    stmt = select(Profile).where(Profile.user_id == user_id)
+    res = await db.execute(stmt)
+    profile = res.scalar_one_or_none()
+    if not profile:
+        profile = Profile(user_id=user_id)
         db.add(profile)
         await db.commit()
         await db.refresh(profile)
@@ -39,56 +39,41 @@ async def _get_or_create_profile(db: AsyncSession, user_id: uuid.UUID) -> Profil
 @router.post(
     "/recommend",
     response_model=TherapyRecommendationResponse,
-    summary="Generate personalized hardware thermal and vibration parameters",
+    summary="Generate deterministic hardware thermal and vibration recommendation",
 )
-async def get_therapy_recommendation(
+async def recommend_therapy(
     payload: TherapyRecommendationRequest = TherapyRecommendationRequest(),
     current_user_id: uuid.UUID = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> TherapyRecommendationResponse:
     profile = await _get_or_create_profile(db, current_user_id)
 
-    severity: int = 0
-    if payload.cramp_severity is not None:
-        severity = payload.cramp_severity
+    pain = 0
+    if payload.pain_score is not None:
+        pain = payload.pain_score
     else:
-        # Check today's daily log or latest log
+        # Check today's logged pain
         today = date.today()
-        stmt = (
-            select(DailyLog)
-            .where(DailyLog.user_id == current_user_id, DailyLog.log_date == today)
-            .limit(1)
+        stmt = select(DailyLog).where(
+            DailyLog.user_id == current_user_id, DailyLog.log_date == today
         )
-        result = await db.execute(stmt)
-        today_log = result.scalar_one_or_none()
+        res = await db.execute(stmt)
+        today_log = res.scalar_one_or_none()
+        if today_log:
+            pain = today_log.pain
 
-        if today_log is not None:
-            severity = today_log.cramp_severity
-        else:
-            # Fallback to the latest logged entry
-            latest_stmt = (
-                select(DailyLog)
-                .where(DailyLog.user_id == current_user_id)
-                .order_by(desc(DailyLog.log_date))
-                .limit(1)
-            )
-            latest_res = await db.execute(latest_stmt)
-            latest_log = latest_res.scalar_one_or_none()
-            if latest_log:
-                severity = latest_log.cramp_severity
-
-    recommendation = generate_recommendation(
-        cramp_severity=severity,
+    rec = calculate_therapy_recommendation(
+        pain_score=pain,
         sensitivity_index=profile.sensitivity_index,
     )
-    return recommendation
+    return TherapyRecommendationResponse(**rec)
 
 
 @router.post(
-    "/session",
+    "/sessions",
     response_model=TherapySessionResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Save a completed hardware therapy session log",
+    summary="Save a completed wearable therapy session",
 )
 async def log_therapy_session(
     payload: TherapySessionCreate,
@@ -99,39 +84,37 @@ async def log_therapy_session(
 
     session = TherapySession(
         user_id=current_user_id,
-        timestamp=payload.timestamp or datetime.now(timezone.utc),
-        target_temp_celsius=payload.target_temp_celsius,
-        vibration_mode=payload.vibration_mode.value,
+        device_id=payload.device_id,
+        started_at=payload.started_at or datetime.now(timezone.utc),
+        ended_at=payload.ended_at,
+        mode=payload.mode,
+        target_temperature_c=payload.target_temperature_c,
         vibration_intensity=payload.vibration_intensity,
-        duration_minutes=payload.duration_minutes,
-        pre_cramp_score=payload.pre_cramp_score,
-        post_relief_score=payload.post_relief_score,
-        feedback_tag=payload.feedback_tag.value if payload.feedback_tag else None,
+        vibration_mode=payload.vibration_mode,
+        pain_before=payload.pain_before,
+        pain_after=payload.pain_after,
+        feedback=payload.feedback,
     )
     db.add(session)
+
+    # Adjust sensitivity if feedback was provided
+    if payload.feedback:
+        new_sens, _ = adjust_sensitivity(profile.sensitivity_index, payload.feedback)
+        profile.sensitivity_index = new_sens
+
     await db.commit()
     await db.refresh(session)
-
-    # If feedback was included on creation, update sensitivity
-    if payload.feedback_tag:
-        new_sensitivity, _ = adjust_sensitivity_on_feedback(
-            current_sensitivity=profile.sensitivity_index,
-            feedback_tag=payload.feedback_tag,
-        )
-        profile.sensitivity_index = new_sensitivity
-        await db.commit()
-
     return session
 
 
 @router.patch(
-    "/session/{session_id}/feedback",
+    "/sessions/{session_id}",
     response_model=TherapySessionResponse,
-    summary="Update post-therapy feedback and adjust adaptive sensitivity index",
+    summary="Update therapy session feedback and tune adaptive sensitivity index",
 )
-async def update_session_feedback(
+async def update_therapy_session(
     session_id: int,
-    payload: TherapySessionFeedbackUpdate,
+    payload: TherapySessionUpdate,
     current_user_id: uuid.UUID = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> TherapySession:
@@ -139,28 +122,22 @@ async def update_session_feedback(
         TherapySession.id == session_id,
         TherapySession.user_id == current_user_id,
     )
-    result = await db.execute(stmt)
-    session = result.scalar_one_or_none()
+    res = await db.execute(stmt)
+    session = res.scalar_one_or_none()
 
-    if session is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Therapy session not found",
-        )
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Therapy session not found")
 
-    session.feedback_tag = payload.feedback_tag.value
-    if payload.post_relief_score is not None:
-        session.post_relief_score = payload.post_relief_score
-
-    # Adjust profile sensitivity
-    profile = await _get_or_create_profile(db, current_user_id)
-    new_sensitivity, _ = adjust_sensitivity_on_feedback(
-        current_sensitivity=profile.sensitivity_index,
-        feedback_tag=payload.feedback_tag,
-    )
-    profile.sensitivity_index = new_sensitivity
+    if payload.ended_at is not None:
+        session.ended_at = payload.ended_at
+    if payload.pain_after is not None:
+        session.pain_after = payload.pain_after
+    if payload.feedback is not None:
+        session.feedback = payload.feedback
+        profile = await _get_or_create_profile(db, current_user_id)
+        new_sens, _ = adjust_sensitivity(profile.sensitivity_index, payload.feedback)
+        profile.sensitivity_index = new_sens
 
     await db.commit()
     await db.refresh(session)
-
     return session

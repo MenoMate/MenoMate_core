@@ -8,30 +8,48 @@ from sqlalchemy.types import Uuid
 from app.db.base import Base
 
 if TYPE_CHECKING:
+    from app.models.device import Device
     from app.models.profile import Profile
 
 
 class TherapySession(Base):
+    """
+    Completed therapy session telemetry and patient relief scores.
+    """
     __tablename__ = "therapy_sessions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey("profiles.id", ondelete="CASCADE"),
+        ForeignKey("profiles.user_id", ondelete="CASCADE"),
         index=True,
         nullable=False,
     )
-    timestamp: Mapped[datetime] = mapped_column(
+    device_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("devices.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
-    target_temp_celsius: Mapped[float] = mapped_column(Float, nullable=False)
-    vibration_mode: Mapped[str] = mapped_column(String(32), default="pulse", nullable=False)
-    vibration_intensity: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    duration_minutes: Mapped[int] = mapped_column(Integer, default=20, nullable=False)
-    pre_cramp_score: Mapped[int] = mapped_column(Integer, nullable=False)
-    post_relief_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    feedback_tag: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    ended_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    mode: Mapped[str] = mapped_column(String(32), default="standard", nullable=False)
+    target_temperature_c: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    vibration_intensity: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    vibration_mode: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    pain_before: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    pain_after: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    feedback: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
 
     user: Mapped["Profile"] = relationship("Profile", back_populates="therapy_sessions")
+    device: Mapped[Optional["Device"]] = relationship("Device", back_populates="therapy_sessions")

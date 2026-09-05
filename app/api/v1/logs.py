@@ -1,33 +1,93 @@
 import uuid
-from datetime import date, timedelta
-from typing import List
-from fastapi import APIRouter, Depends, Query, status
+from datetime import date
+from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.security import get_current_user
 from app.db.session import get_db
 from app.models.daily_log import DailyLog
 from app.models.profile import Profile
-from app.schemas.daily_log import DailyLogCreate, DailyLogResponse
+from app.models.symptom_log import SymptomLog
+from app.schemas.daily_log import (
+    SUPPORTED_SYMPTOMS,
+    DailyLogCreate,
+    DailyLogResponse,
+    DailyLogUpdate,
+    SymptomItem,
+    SymptomMeta,
+)
 
-router = APIRouter(prefix="/logs", tags=["Daily Logs & Symptoms"])
+router = APIRouter(tags=["Daily Logs & Symptoms"])
 
 
 async def _ensure_profile_exists(db: AsyncSession, user_id: uuid.UUID) -> None:
-    stmt = select(Profile).where(Profile.id == user_id)
-    result = await db.execute(stmt)
-    if result.scalar_one_or_none() is None:
-        profile = Profile(id=user_id)
-        db.add(profile)
-        await db.commit()
+    stmt = select(Profile).where(Profile.user_id == user_id)
+    res = await db.execute(stmt)
+    if not res.scalar_one_or_none():
+        db.add(Profile(user_id=user_id))
+        await db.flush()
+
+
+@router.get(
+    "/symptoms",
+    response_model=List[SymptomMeta],
+    summary="Get supported semantic symptom identifiers and metadata",
+)
+async def get_supported_symptoms() -> List[SymptomMeta]:
+    """
+    Returns static supported symptom definitions without requiring a database query.
+    """
+    return [SymptomMeta(**s) for s in SUPPORTED_SYMPTOMS]
+
+
+@router.get(
+    "/logs/{log_date}",
+    response_model=Optional[DailyLogResponse],
+    summary="Get daily log and child symptoms for a specific calendar date",
+)
+async def get_log_by_date(
+    log_date: date,
+    current_user_id: uuid.UUID = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Optional[DailyLog]:
+    stmt = (
+        select(DailyLog)
+        .where(DailyLog.user_id == current_user_id, DailyLog.log_date == log_date)
+        .options(selectinload(DailyLog.symptoms))
+    )
+    res = await db.execute(stmt)
+    return res.scalar_one_or_none()
+
+
+@router.get(
+    "/logs",
+    response_model=List[DailyLogResponse],
+    summary="Query daily logs within an optional date range",
+)
+async def query_logs(
+    start_date: Optional[date] = Query(default=None),
+    end_date: Optional[date] = Query(default=None),
+    current_user_id: uuid.UUID = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> List[DailyLog]:
+    stmt = select(DailyLog).where(DailyLog.user_id == current_user_id)
+    if start_date:
+        stmt = stmt.where(DailyLog.log_date >= start_date)
+    if end_date:
+        stmt = stmt.where(DailyLog.log_date <= end_date)
+    stmt = stmt.order_by(desc(DailyLog.log_date)).options(selectinload(DailyLog.symptoms))
+    res = await db.execute(stmt)
+    return list(res.scalars().all())
 
 
 @router.post(
-    "/daily",
+    "/logs",
     response_model=DailyLogResponse,
     status_code=status.HTTP_200_OK,
-    summary="Upsert daily symptom and cramp record",
+    summary="Create or update daily log and child symptoms in one transaction",
 )
 async def upsert_daily_log(
     payload: DailyLogCreate,
@@ -37,56 +97,85 @@ async def upsert_daily_log(
     await _ensure_profile_exists(db, current_user_id)
     log_date = payload.log_date or date.today()
 
-    stmt = select(DailyLog).where(
-        DailyLog.user_id == current_user_id,
-        DailyLog.log_date == log_date,
-    )
-    result = await db.execute(stmt)
-    existing_log = result.scalar_one_or_none()
-
-    if existing_log:
-        existing_log.cramp_severity = payload.cramp_severity
-        existing_log.flow_intensity = payload.flow_intensity.value
-        existing_log.mood = payload.mood.value
-        existing_log.symptoms = payload.symptoms
-        existing_log.notes = payload.notes
-        log_entry = existing_log
-    else:
-        log_entry = DailyLog(
-            user_id=current_user_id,
-            log_date=log_date,
-            cramp_severity=payload.cramp_severity,
-            flow_intensity=payload.flow_intensity.value,
-            mood=payload.mood.value,
-            symptoms=payload.symptoms,
-            notes=payload.notes,
-        )
-        db.add(log_entry)
-
-    await db.commit()
-    await db.refresh(log_entry)
-    return log_entry
-
-
-@router.get(
-    "/history",
-    response_model=List[DailyLogResponse],
-    summary="Fetch past days of symptom logs (default 30 days)",
-)
-async def get_log_history(
-    days: int = Query(default=30, ge=1, le=365, description="Number of past days to retrieve"),
-    current_user_id: uuid.UUID = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> List[DailyLog]:
-    cutoff_date = date.today() - timedelta(days=days)
+    # Find existing daily log for (user_id, log_date)
     stmt = (
         select(DailyLog)
-        .where(
-            DailyLog.user_id == current_user_id,
-            DailyLog.log_date >= cutoff_date,
-        )
-        .order_by(desc(DailyLog.log_date))
+        .where(DailyLog.user_id == current_user_id, DailyLog.log_date == log_date)
+        .options(selectinload(DailyLog.symptoms))
     )
-    result = await db.execute(stmt)
-    logs = list(result.scalars().all())
-    return logs
+    res = await db.execute(stmt)
+    daily_log = res.scalar_one_or_none()
+
+    symptom_objects = [
+        SymptomLog(symptom_type=item.symptom_type, severity=item.severity)
+        for item in payload.symptoms
+    ]
+
+    if daily_log is None:
+        daily_log = DailyLog(
+            user_id=current_user_id,
+            log_date=log_date,
+            pain=payload.pain,
+            mood=payload.mood.value if payload.mood else None,
+            discharge=payload.discharge.value if payload.discharge else None,
+            flow=payload.flow.value if payload.flow else None,
+            notes=payload.notes,
+            symptoms=symptom_objects,
+        )
+        db.add(daily_log)
+    else:
+        daily_log.pain = payload.pain
+        daily_log.mood = payload.mood.value if payload.mood else None
+        daily_log.discharge = payload.discharge.value if payload.discharge else None
+        daily_log.flow = payload.flow.value if payload.flow else None
+        daily_log.notes = payload.notes
+        daily_log.symptoms = symptom_objects
+
+    await db.commit()
+    await db.refresh(daily_log, ["symptoms"])
+    return daily_log
+
+
+@router.patch(
+    "/logs/{log_id}",
+    response_model=DailyLogResponse,
+    summary="Partially update a daily log entry",
+)
+async def update_daily_log(
+    log_id: int,
+    payload: DailyLogUpdate,
+    current_user_id: uuid.UUID = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DailyLog:
+    stmt = (
+        select(DailyLog)
+        .where(DailyLog.id == log_id, DailyLog.user_id == current_user_id)
+        .options(selectinload(DailyLog.symptoms))
+    )
+    res = await db.execute(stmt)
+    daily_log = res.scalar_one_or_none()
+
+    if not daily_log:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Daily log not found")
+
+    if payload.pain is not None:
+        daily_log.pain = payload.pain
+    if payload.mood is not None:
+        daily_log.mood = payload.mood.value
+    if payload.discharge is not None:
+        daily_log.discharge = payload.discharge.value
+    if payload.flow is not None:
+        daily_log.flow = payload.flow.value
+    if payload.notes is not None:
+        daily_log.notes = payload.notes
+
+    if payload.symptoms is not None:
+        daily_log.symptoms = [
+            SymptomLog(symptom_type=item.symptom_type, severity=item.severity)
+            for item in payload.symptoms
+        ]
+
+    await db.commit()
+    await db.refresh(daily_log, ["symptoms"])
+    return daily_log
+

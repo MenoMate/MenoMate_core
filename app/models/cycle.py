@@ -1,7 +1,7 @@
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Optional, TYPE_CHECKING
-from sqlalchemy import Boolean, Date, ForeignKey, Integer
+from sqlalchemy import Date, DateTime, ForeignKey, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import Uuid
 
@@ -12,18 +12,33 @@ if TYPE_CHECKING:
 
 
 class Cycle(Base):
+    """
+    Represents a menstrual period occurrence.
+    period_start = first day of bleeding.
+    period_end = last day of bleeding (nullable while bleeding is ongoing).
+    Cycle length is measured start-to-start between consecutive periods.
+    """
     __tablename__ = "cycles"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey("profiles.id", ondelete="CASCADE"),
+        ForeignKey("profiles.user_id", ondelete="CASCADE"),
         index=True,
         nullable=False,
     )
-    start_date: Mapped[date] = mapped_column(Date, nullable=False)
-    end_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
-    predicted_ovulation: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    period_start: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    period_end: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
 
     user: Mapped["Profile"] = relationship("Profile", back_populates="cycles")
