@@ -66,7 +66,10 @@ class CurrentCycleResponse(BaseModel):
     latest_period_end: Optional[date] = None
     predicted_cycle_length: Optional[int] = None
     predicted_next_period: Optional[date] = None
-    days_until_next_period: Optional[int] = None
+    days_until_next_period: Optional[int] = Field(
+        default=None,
+        description="Days until predicted next period start. Positive if upcoming, 0 if today, negative indicates days overdue if predicted date has passed without a new period.",
+    )
     prediction_confidence: str
     prediction_source: Optional[str] = None
     average_cycle_length: Optional[int] = None

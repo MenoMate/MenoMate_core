@@ -90,7 +90,7 @@ async def build_care_context(
         }
 
     # --- Symptom Inquiry Context ---
-    if intent in ("symptoms", "symptom_inquiry"):
+    if intent in ("symptom_insight", "symptoms", "symptom_inquiry"):
         cutoff = today - timedelta(days=max(days_back, 7))
         stmt = (
             select(DailyLog)

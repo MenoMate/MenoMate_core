@@ -73,7 +73,16 @@ async def get_current_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        # 1. Require and validate audience claim (must be exactly 'authenticated')
+        # 1. Require and validate expiration claim
+        exp = payload.get("exp")
+        if exp is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token missing expiration claim",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        # 2. Require and validate audience claim (must be exactly 'authenticated')
         aud = payload.get("aud")
         if not aud:
             raise HTTPException(

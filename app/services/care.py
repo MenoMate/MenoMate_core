@@ -52,9 +52,15 @@ async def handle_care_interaction(
         conf = summary["prediction_confidence"]
         
         if next_p:
+            if days_left is not None and days_left < 0:
+                timeline_str = f"({abs(days_left)} days overdue, predicted: {next_p}, confidence: {conf})"
+            elif days_left == 0:
+                timeline_str = f"(predicted for today, confidence: {conf})"
+            else:
+                timeline_str = f"(in approximately {days_left} days, confidence: {conf})"
             reply = (
                 f"You are currently on Day {cycle_day} of your cycle, in the {phase.capitalize()} phase. "
-                f"Your next estimated period is around {next_p} (in approximately {days_left} days, confidence: {conf})."
+                f"Your next estimated period is around {next_p} {timeline_str}."
             )
         else:
             reply = (

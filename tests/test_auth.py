@@ -54,12 +54,31 @@ async def test_auth_expired_token(async_client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_auth_missing_exp(async_client: AsyncClient):
+    payload = {
+        "sub": str(TEST_USER_ID),
+        "aud": "authenticated",
+        "iss": f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1",
+        "role": "authenticated",
+    }
+    no_exp_token = jwt.encode(payload, settings.SUPABASE_JWT_SECRET, algorithm="HS256")
+    res = await async_client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {no_exp_token}"},
+    )
+    assert res.status_code == 401
+    assert "Token missing expiration claim" in res.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_auth_invalid_audience(async_client: AsyncClient):
+    future_exp = int((datetime.now(timezone.utc) + timedelta(hours=1)).timestamp())
     payload = {
         "sub": str(TEST_USER_ID),
         "aud": "unauthorized_audience",
         "iss": f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1",
         "role": "authenticated",
+        "exp": future_exp,
     }
     bad_aud_token = jwt.encode(payload, settings.SUPABASE_JWT_SECRET, algorithm="HS256")
 
@@ -73,11 +92,13 @@ async def test_auth_invalid_audience(async_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_auth_invalid_issuer(async_client: AsyncClient):
+    future_exp = int((datetime.now(timezone.utc) + timedelta(hours=1)).timestamp())
     payload = {
         "sub": str(TEST_USER_ID),
         "aud": "authenticated",
         "iss": "https://malicious-issuer.com/auth/v1",
         "role": "authenticated",
+        "exp": future_exp,
     }
     bad_iss_token = jwt.encode(payload, settings.SUPABASE_JWT_SECRET, algorithm="HS256")
 
@@ -92,6 +113,7 @@ async def test_auth_invalid_issuer(async_client: AsyncClient):
 @pytest.mark.asyncio
 async def test_auth_rejects_test_audience_and_test_issuer(async_client: AsyncClient):
     expected_iss = f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1"
+    future_exp = int((datetime.now(timezone.utc) + timedelta(hours=1)).timestamp())
 
     # 1. aud="test" must be rejected in production authentication
     payload_bad_aud = {
@@ -99,6 +121,7 @@ async def test_auth_rejects_test_audience_and_test_issuer(async_client: AsyncCli
         "aud": "test",
         "iss": expected_iss,
         "role": "authenticated",
+        "exp": future_exp,
     }
     token_bad_aud = jwt.encode(payload_bad_aud, settings.SUPABASE_JWT_SECRET, algorithm="HS256")
     res_aud = await async_client.get(
@@ -114,6 +137,7 @@ async def test_auth_rejects_test_audience_and_test_issuer(async_client: AsyncCli
         "aud": "authenticated",
         "iss": "test",
         "role": "authenticated",
+        "exp": future_exp,
     }
     token_bad_iss = jwt.encode(payload_bad_iss, settings.SUPABASE_JWT_SECRET, algorithm="HS256")
     res_iss = await async_client.get(
@@ -225,3 +249,81 @@ async def test_profile_patch_null_semantics(async_client: AsyncClient, auth_head
     assert data["name"] is None
     assert data["usual_cycle_days"] is None
     assert data["usual_period_days"] is None
+
+
+def test_settings_rejects_insecure_placeholders():
+    from app.core.config import Settings
+    import pydantic
+
+    # 1. Missing or placeholder SUPABASE_URL
+    with pytest.raises(pydantic.ValidationError) as exc1:
+        Settings(
+            SUPABASE_URL="https://your-project-ref.supabase.co",
+            SUPABASE_JWT_SECRET="strong-secret-key-32-chars-long!",
+        )
+    assert "insecure configuration" in str(exc1.value).lower()
+
+    # 2. Missing or placeholder SUPABASE_JWT_SECRET
+    with pytest.raises(pydantic.ValidationError) as exc2:
+        Settings(
+            SUPABASE_URL="https://valid-project.supabase.co",
+            SUPABASE_JWT_SECRET="your-supabase-jwt-secret",
+        )
+    assert "insecure configuration" in str(exc2.value).lower()
+
+    # 3. Valid non-placeholder settings succeed
+    valid_cfg = Settings(
+        SUPABASE_URL="https://valid-project.supabase.co",
+        SUPABASE_JWT_SECRET="strong-secret-key-32-chars-long!",
+    )
+    assert valid_cfg.SUPABASE_URL == "https://valid-project.supabase.co"
+
+
+@pytest.mark.asyncio
+async def test_profile_sensitivity_not_client_writable(async_client: AsyncClient, auth_headers: dict):
+    # Fetch current baseline sensitivity
+    res_before = await async_client.get("/api/v1/profile", headers=auth_headers)
+    assert res_before.status_code == 200
+    baseline_sens = res_before.json()["sensitivity_index"]
+
+    # Attempt to directly patch sensitivity_index to a new value
+    patch_res = await async_client.patch(
+        "/api/v1/profile",
+        headers=auth_headers,
+        json={"sensitivity_index": 1.45},
+    )
+    assert patch_res.status_code == 200
+
+    # Sensitivity index MUST remain untouched by direct client writes
+    res_after = await async_client.get("/api/v1/profile", headers=auth_headers)
+    assert res_after.json()["sensitivity_index"] == baseline_sens
+
+
+@pytest.mark.asyncio
+async def test_profile_controlled_enums_theme_and_units(async_client: AsyncClient, auth_headers: dict):
+    # Valid enum values
+    valid_res = await async_client.patch(
+        "/api/v1/profile",
+        headers=auth_headers,
+        json={"theme": "light", "units": "imperial"},
+    )
+    assert valid_res.status_code == 200
+    data = valid_res.json()
+    assert data["theme"] == "light"
+    assert data["units"] == "imperial"
+
+    # Invalid theme value -> 422
+    bad_theme = await async_client.patch(
+        "/api/v1/profile",
+        headers=auth_headers,
+        json={"theme": "neon_rainbow"},
+    )
+    assert bad_theme.status_code == 422
+
+    # Invalid units value -> 422
+    bad_units = await async_client.patch(
+        "/api/v1/profile",
+        headers=auth_headers,
+        json={"units": "kelvin"},
+    )
+    assert bad_units.status_code == 422

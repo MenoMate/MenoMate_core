@@ -169,3 +169,17 @@ async def test_query_logs_date_range(async_client: AsyncClient, auth_headers: di
     assert res.status_code == 200
     logs = res.json()
     assert len(logs) >= 2
+
+
+@pytest.mark.asyncio
+async def test_query_logs_inverted_date_range_rejected(async_client: AsyncClient, auth_headers: dict):
+    d1 = date.today() - timedelta(days=2)
+    d2 = date.today() - timedelta(days=5)
+
+    # Inverted: start_date (2 days ago) > end_date (5 days ago)
+    res = await async_client.get(
+        f"/api/v1/logs?start_date={d1}&end_date={d2}",
+        headers=auth_headers,
+    )
+    assert res.status_code == 422
+    assert "start_date cannot be after end_date" in res.json()["detail"]

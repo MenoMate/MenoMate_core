@@ -64,3 +64,44 @@ async def test_care_personalized_inquiry_mock_ai(async_client: AsyncClient, auth
     assert "cramp" in data["response_text"].lower() or "heat" in data["response_text"].lower()
     assert "disclaimer" in data
     assert len(data["suggested_actions"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_care_symptom_insight(async_client: AsyncClient, auth_headers: dict):
+    # 1. Log some daily symptoms first
+    await async_client.post(
+        "/api/v1/logs",
+        headers=auth_headers,
+        json={
+            "log_date": "2026-08-16",
+            "pain": 5,
+            "mood": "fatigued",
+            "symptoms": ["headache", "bloating", "cramps"],
+        },
+    )
+
+    # 2. Query care with canonical intent="symptom_insight"
+    res = await async_client.post(
+        "/api/v1/care/interactions",
+        headers=auth_headers,
+        json={"intent": "symptom_insight", "user_message": "Why am I having bloating and headaches?"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["intent"] == "symptom_insight"
+    assert data["is_ai_generated"] is True
+    assert "disclaimer" in data
+
+
+@pytest.mark.asyncio
+async def test_care_default_intent_is_wellness_help(async_client: AsyncClient, auth_headers: dict):
+    # Omitting intent must default to wellness_help rather than cycle_insight
+    res = await async_client.post(
+        "/api/v1/care/interactions",
+        headers=auth_headers,
+        json={"user_message": "Feeling tired today"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["intent"] == "wellness_help"
+    assert data["is_ai_generated"] is True

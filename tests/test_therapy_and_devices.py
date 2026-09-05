@@ -180,7 +180,10 @@ async def test_therapy_feedback_no_double_application_and_controlled_values(
     assert s_res.status_code == 201
     s_id = s_res.json()["id"]
 
-    # First feedback PATCH -> bumps sensitivity to 1.05
+    # First feedback PATCH -> bumps sensitivity
+    prof_before = await async_client.get("/api/v1/profile", headers=auth_headers)
+    initial_sens = prof_before.json()["sensitivity_index"]
+
     p1 = await async_client.patch(
         f"/api/v1/therapy/sessions/{s_id}",
         headers=auth_headers,
@@ -188,9 +191,9 @@ async def test_therapy_feedback_no_double_application_and_controlled_values(
     )
     assert p1.status_code == 200
     prof1 = await async_client.get("/api/v1/profile", headers=auth_headers)
-    assert prof1.json()["sensitivity_index"] == 1.05
+    assert round(prof1.json()["sensitivity_index"], 2) == round(initial_sens + 0.05, 2)
 
-    # Repeated feedback PATCH on the same session -> should NOT bump sensitivity again
+    # Repeated identical feedback PATCH on the same session -> idempotent no-op 200, does NOT bump sensitivity again
     p2 = await async_client.patch(
         f"/api/v1/therapy/sessions/{s_id}",
         headers=auth_headers,
@@ -198,7 +201,16 @@ async def test_therapy_feedback_no_double_application_and_controlled_values(
     )
     assert p2.status_code == 200
     prof2 = await async_client.get("/api/v1/profile", headers=auth_headers)
-    assert prof2.json()["sensitivity_index"] == 1.05  # Remains 1.05, not 1.10
+    assert prof2.json()["sensitivity_index"] == prof1.json()["sensitivity_index"]
+
+    # Changing feedback to a different value on the same session -> rejected with 409 Conflict (immutable)
+    p_conflict = await async_client.patch(
+        f"/api/v1/therapy/sessions/{s_id}",
+        headers=auth_headers,
+        json={"feedback": "too_hot"},
+    )
+    assert p_conflict.status_code == 409
+    assert "immutable" in p_conflict.json()["detail"].lower()
 
     # Invalid feedback string must be rejected with 422
     p_invalid = await async_client.patch(
@@ -246,3 +258,107 @@ async def test_therapy_session_date_validation(async_client: AsyncClient, auth_h
     )
     assert bad_patch.status_code == 400
     assert "ended_at cannot be prior to started_at" in bad_patch.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_therapy_temperature_bounds(async_client: AsyncClient, auth_headers: dict):
+    # 1. Negative temperature rejected (ge=0.0)
+    neg_res = await async_client.post(
+        "/api/v1/therapy/sessions",
+        headers=auth_headers,
+        json={"mode": "standard", "target_temperature_c": -5.0},
+    )
+    assert neg_res.status_code == 422
+
+    # 2. Temperature above safety ceiling 44.0 rejected (le=44.0)
+    high_res = await async_client.post(
+        "/api/v1/therapy/sessions",
+        headers=auth_headers,
+        json={"mode": "standard", "target_temperature_c": 45.0},
+    )
+    assert high_res.status_code == 422
+
+    # 3. Valid temperature within [0.0, 44.0] accepted
+    valid_res = await async_client.post(
+        "/api/v1/therapy/sessions",
+        headers=auth_headers,
+        json={"mode": "standard", "target_temperature_c": 40.5},
+    )
+    assert valid_res.status_code == 201
+    assert valid_res.json()["target_temperature_c"] == 40.5
+
+
+@pytest.mark.asyncio
+async def test_therapy_timestamp_utc_normalization(async_client: AsyncClient, auth_headers: dict):
+    # Pass naive datetime string
+    naive_started = "2026-08-20T10:00:00"
+    naive_ended = "2026-08-20T10:30:00"
+
+    res = await async_client.post(
+        "/api/v1/therapy/sessions",
+        headers=auth_headers,
+        json={
+            "mode": "standard",
+            "started_at": naive_started,
+            "ended_at": naive_ended,
+            "target_temperature_c": 38.0,
+        },
+    )
+    assert res.status_code == 201
+    data = res.json()
+    assert data["started_at"] is not None
+    assert data["ended_at"] is not None
+    # Verify response contains UTC timezone offset (+00:00 or Z)
+    assert "+00:00" in data["started_at"] or "Z" in data["started_at"]
+
+
+@pytest.mark.asyncio
+async def test_device_duplicate_identifier_cross_user_conflict(
+    async_client: AsyncClient, auth_headers: dict, other_user_auth_headers: dict
+):
+    dev_id = "ESP32-UNIQUE-SN-999"
+
+    # User 1 registers device
+    r1 = await async_client.post(
+        "/api/v1/devices",
+        headers=auth_headers,
+        json={"device_identifier": dev_id, "name": "User 1 Belt"},
+    )
+    assert r1.status_code == 201
+
+    # User 2 attempts to register same device -> 409 Conflict
+    r2 = await async_client.post(
+        "/api/v1/devices",
+        headers=other_user_auth_headers,
+        json={"device_identifier": dev_id, "name": "User 2 Belt"},
+    )
+    assert r2.status_code == 409
+    assert "already registered to another user" in r2.json()["detail"].lower()
+
+    # User 1 re-registers same device -> updates existing device record (no 500)
+    r3 = await async_client.post(
+        "/api/v1/devices",
+        headers=auth_headers,
+        json={"device_identifier": dev_id, "name": "User 1 Belt Renamed"},
+    )
+    assert r3.status_code == 201
+    assert r3.json()["name"] == "User 1 Belt Renamed"
+
+
+@pytest.mark.asyncio
+async def test_device_empty_or_whitespace_identifier_rejected(async_client: AsyncClient, auth_headers: dict):
+    # Empty string
+    r1 = await async_client.post(
+        "/api/v1/devices",
+        headers=auth_headers,
+        json={"device_identifier": ""},
+    )
+    assert r1.status_code == 422
+
+    # Whitespace only
+    r2 = await async_client.post(
+        "/api/v1/devices",
+        headers=auth_headers,
+        json={"device_identifier": "   "},
+    )
+    assert r2.status_code == 422

@@ -13,7 +13,10 @@ class CurrentSummaryResponse(BaseModel):
     latest_period_start: Optional[date] = None
     latest_period_end: Optional[date] = None
     predicted_next_period: Optional[date] = None
-    days_until_next_period: Optional[int] = None
+    days_until_next_period: Optional[int] = Field(
+        default=None,
+        description="Days until predicted next period start. Positive if upcoming, 0 if today, negative indicates days overdue if predicted date has passed without a new period.",
+    )
     prediction_confidence: str = Field(..., description="high, moderate, low, or insufficient_data")
     average_cycle_length: Optional[int] = None
     average_period_length: Optional[int] = None

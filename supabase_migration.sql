@@ -143,7 +143,7 @@ CREATE TABLE IF NOT EXISTS public.therapy_sessions (
     started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     ended_at TIMESTAMPTZ,
     mode VARCHAR(32) NOT NULL DEFAULT 'standard',
-    target_temperature_c DOUBLE PRECISION,
+    target_temperature_c DOUBLE PRECISION CHECK (target_temperature_c IS NULL OR (target_temperature_c >= 0.0 AND target_temperature_c <= 44.0)),
     vibration_intensity INTEGER,
     vibration_mode VARCHAR(32),
     pain_before INTEGER,

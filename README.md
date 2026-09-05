@@ -226,7 +226,7 @@ menomate-core/
 ├── supabase_initial_schema.sql      # Canonical DDL for fresh databases
 ├── supabase_migration.sql           # Non-destructive migration script
 ├── THIRD_PARTY_NOTICES.md           # Open-source attributions and licenses
-├── requirements.txt                 # Pinned dependencies
+├── requirements.txt                 # Minimum supported dependency versions
 ├── pytest.ini                       # Test runner configuration
 └── README.md                        # Documentation
 ```

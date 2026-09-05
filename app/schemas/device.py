@@ -1,13 +1,21 @@
 import uuid
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class DeviceCreate(BaseModel):
-    device_identifier: str = Field(..., max_length=128, description="Unique hardware identifier (MAC or BLE UUID)")
+    device_identifier: str = Field(..., min_length=1, max_length=128, description="Unique hardware identifier (MAC or BLE UUID)")
     name: Optional[str] = Field(default=None, max_length=128)
     firmware_version: Optional[str] = Field(default=None, max_length=64)
+
+    @field_validator("device_identifier")
+    @classmethod
+    def validate_identifier(cls, v: str) -> str:
+        clean = v.strip()
+        if not clean:
+            raise ValueError("device_identifier cannot be empty or whitespace only")
+        return clean
 
 
 class DeviceResponse(BaseModel):

@@ -18,6 +18,7 @@ from app.schemas.therapy import (
     TherapySessionResponse,
     TherapySessionUpdate,
 )
+from app.services.profile import get_or_create_profile
 from app.services.therapy_policy import (
     adjust_sensitivity,
     calculate_therapy_recommendation,
@@ -32,18 +33,6 @@ def _normalize_dt(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
-async def _get_or_create_profile(db: AsyncSession, user_id: uuid.UUID) -> Profile:
-    stmt = select(Profile).where(Profile.user_id == user_id)
-    res = await db.execute(stmt)
-    profile = res.scalar_one_or_none()
-    if not profile:
-        profile = Profile(user_id=user_id)
-        db.add(profile)
-        await db.commit()
-        await db.refresh(profile)
-    return profile
-
-
 @router.post(
     "/recommend",
     response_model=TherapyRecommendationResponse,
@@ -54,7 +43,7 @@ async def recommend_therapy(
     current_user_id: uuid.UUID = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> TherapyRecommendationResponse:
-    profile = await _get_or_create_profile(db, current_user_id)
+    profile = await get_or_create_profile(db, current_user_id)
 
     pain = 0
     if payload.pain_score is not None:
@@ -106,7 +95,7 @@ async def log_therapy_session(
     current_user_id: uuid.UUID = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> TherapySession:
-    profile = await _get_or_create_profile(db, current_user_id)
+    profile = await get_or_create_profile(db, current_user_id)
 
     # 1. Device ownership check
     if payload.device_id is not None:
@@ -122,9 +111,10 @@ async def log_therapy_session(
                 detail="Device not found or not owned by authenticated user",
             )
 
-    # 2. Therapy session date validation
-    started_at = payload.started_at or datetime.now(timezone.utc)
-    if payload.ended_at and _normalize_dt(payload.ended_at) < _normalize_dt(started_at):
+    # 2. Therapy session date validation and UTC normalization
+    started_at = _normalize_dt(payload.started_at) if payload.started_at else datetime.now(timezone.utc)
+    ended_at = _normalize_dt(payload.ended_at) if payload.ended_at else None
+    if ended_at and ended_at < started_at:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="ended_at cannot be prior to started_at",
@@ -136,7 +126,7 @@ async def log_therapy_session(
         user_id=current_user_id,
         device_id=payload.device_id,
         started_at=started_at,
-        ended_at=payload.ended_at,
+        ended_at=ended_at,
         mode=payload.mode,
         target_temperature_c=payload.target_temperature_c,
         vibration_intensity=payload.vibration_intensity,
@@ -161,7 +151,10 @@ async def log_therapy_session(
     "/sessions/{session_id}",
     response_model=TherapySessionResponse,
     summary="Update therapy session feedback and tune adaptive sensitivity index",
-    description="Updates therapy session feedback and tunes sensitivity index once. Subsequent feedback edits update the record without repeated sensitivity adjustment.",
+    description=(
+        "Updates therapy session feedback and tunes sensitivity index once. "
+        "Therapy feedback is immutable once set; submitting different feedback returns 409 Conflict."
+    ),
 )
 async def update_therapy_session(
     session_id: int,
@@ -180,24 +173,31 @@ async def update_therapy_session(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Therapy session not found")
 
     if payload.ended_at is not None:
-        if session.started_at and _normalize_dt(payload.ended_at) < _normalize_dt(session.started_at):
+        normalized_ended = _normalize_dt(payload.ended_at)
+        if session.started_at and normalized_ended < _normalize_dt(session.started_at):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="ended_at cannot be prior to started_at",
             )
-        session.ended_at = payload.ended_at
+        session.ended_at = normalized_ended
 
     if payload.pain_after is not None:
         session.pain_after = payload.pain_after
 
     if payload.feedback is not None:
         fb_val = payload.feedback.value if hasattr(payload.feedback, "value") else str(payload.feedback)
-        # Prevent double-application: only adjust sensitivity if this session had no feedback set yet
-        if session.feedback is None:
-            profile = await _get_or_create_profile(db, current_user_id)
+        if session.feedback is not None:
+            if session.feedback != fb_val:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Therapy session feedback has already been recorded and is immutable.",
+                )
+            # Same feedback repeated is an idempotent no-op
+        else:
+            profile = await get_or_create_profile(db, current_user_id)
             new_sens, _ = adjust_sensitivity(profile.sensitivity_index, fb_val)
             profile.sensitivity_index = new_sens
-        session.feedback = fb_val
+            session.feedback = fb_val
 
     await db.commit()
     await db.refresh(session)

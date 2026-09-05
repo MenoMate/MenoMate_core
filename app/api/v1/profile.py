@@ -7,20 +7,9 @@ from app.core.security import get_current_user
 from app.db.session import get_db
 from app.models.profile import Profile
 from app.schemas.profile import ProfileResponse, ProfileUpdate
+from app.services.profile import get_or_create_profile
 
 router = APIRouter(prefix="/profile", tags=["Profile"])
-
-
-async def _get_or_create_profile(db: AsyncSession, user_id: uuid.UUID) -> Profile:
-    stmt = select(Profile).where(Profile.user_id == user_id)
-    result = await db.execute(stmt)
-    profile = result.scalar_one_or_none()
-    if profile is None:
-        profile = Profile(user_id=user_id)
-        db.add(profile)
-        await db.commit()
-        await db.refresh(profile)
-    return profile
 
 
 @router.get(
@@ -32,7 +21,7 @@ async def get_profile(
     current_user_id: uuid.UUID = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Profile:
-    return await _get_or_create_profile(db, current_user_id)
+    return await get_or_create_profile(db, current_user_id)
 
 
 @router.patch(
@@ -46,7 +35,7 @@ async def update_profile(
     current_user_id: uuid.UUID = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Profile:
-    profile = await _get_or_create_profile(db, current_user_id)
+    profile = await get_or_create_profile(db, current_user_id)
     fields_set = payload.model_fields_set
 
     if "name" in fields_set:
@@ -56,11 +45,9 @@ async def update_profile(
     if "usual_period_days" in fields_set:
         profile.usual_period_days = payload.usual_period_days
     if "theme" in fields_set and payload.theme is not None:
-        profile.theme = payload.theme
+        profile.theme = payload.theme.value
     if "units" in fields_set and payload.units is not None:
-        profile.units = payload.units
-    if "sensitivity_index" in fields_set and payload.sensitivity_index is not None:
-        profile.sensitivity_index = payload.sensitivity_index
+        profile.units = payload.units.value
 
     await db.commit()
     await db.refresh(profile)

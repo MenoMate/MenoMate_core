@@ -7,6 +7,7 @@ from app.core.security import get_current_user
 from app.db.session import get_db
 from app.models.profile import Profile
 from app.schemas.profile import ProfileResponse
+from app.services.profile import get_or_create_profile
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -23,16 +24,6 @@ async def get_me(
 ) -> Profile:
     """
     Returns the authenticated user's application profile.
-    Initializes a baseline profile record if this is the first login.
+    Initializes a baseline profile record safely if this is the first login.
     """
-    stmt = select(Profile).where(Profile.user_id == current_user_id)
-    result = await db.execute(stmt)
-    profile = result.scalar_one_or_none()
-
-    if profile is None:
-        profile = Profile(user_id=current_user_id)
-        db.add(profile)
-        await db.commit()
-        await db.refresh(profile)
-
-    return profile
+    return await get_or_create_profile(db, current_user_id)

@@ -73,6 +73,12 @@ async def query_logs(
     current_user_id: uuid.UUID = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> List[DailyLog]:
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(
+            status_code=getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422),
+            detail="start_date cannot be after end_date",
+        )
+
     stmt = select(DailyLog).where(DailyLog.user_id == current_user_id)
     if start_date:
         stmt = stmt.where(DailyLog.log_date >= start_date)

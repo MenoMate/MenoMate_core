@@ -9,15 +9,19 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from datetime import datetime, timedelta, timezone
+
 # Ensure root directory is on python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Set dummy test secret & database
+# Set dummy test credentials & database before settings initialization
 os.environ["SUPABASE_JWT_SECRET"] = "test-secret-key-12345678901234567890"
+os.environ["SUPABASE_URL"] = "https://test-project.supabase.co"
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 
 from app.core.config import settings
 settings.SUPABASE_JWT_SECRET = "test-secret-key-12345678901234567890"
+settings.SUPABASE_URL = "https://test-project.supabase.co"
 
 import app.models  # Ensure all models are registered with Base.metadata
 from app.db.base import Base
@@ -51,12 +55,18 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
 def make_token(
     user_id: uuid.UUID = TEST_USER_ID,
     aud: str = "authenticated",
-    iss: str = "https://your-project-ref.supabase.co/auth/v1",
+    iss: str = None,
+    exp: int = None,
 ) -> str:
+    if iss is None:
+        iss = f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1"
+    if exp is None:
+        exp = int((datetime.now(timezone.utc) + timedelta(hours=1)).timestamp())
     payload = {
         "sub": str(user_id),
         "aud": aud,
         "iss": iss,
+        "exp": exp,
         "role": "authenticated",
         "email": "user@menomate.health",
     }

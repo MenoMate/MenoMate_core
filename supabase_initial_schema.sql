@@ -3,6 +3,9 @@
 -- Target: Fresh Supabase Project
 -- =============================================================================
 
+-- Enable UUID extension for gen_random_uuid()
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
 -- 1. Profiles Table (1-to-1 with Supabase Auth users)
 CREATE TABLE IF NOT EXISTS public.profiles (
     user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -78,7 +81,7 @@ CREATE TABLE IF NOT EXISTS public.therapy_sessions (
     started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     ended_at TIMESTAMPTZ,
     mode VARCHAR(32) NOT NULL DEFAULT 'standard',
-    target_temperature_c DOUBLE PRECISION CHECK (target_temperature_c IS NULL OR target_temperature_c <= 44.0),
+    target_temperature_c DOUBLE PRECISION CHECK (target_temperature_c IS NULL OR (target_temperature_c >= 0.0 AND target_temperature_c <= 44.0)),
     vibration_intensity INTEGER CHECK (vibration_intensity IS NULL OR (vibration_intensity >= 0 AND vibration_intensity <= 100)),
     vibration_mode VARCHAR(32),
     pain_before INTEGER CHECK (pain_before IS NULL OR (pain_before >= 0 AND pain_before <= 10)),

@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from enum import Enum
 import uuid
 from typing import Optional
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class TherapyFeedbackEnum(str, Enum):
@@ -32,12 +32,19 @@ class TherapySessionCreate(BaseModel):
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
     mode: str = Field(default="standard", max_length=32)
-    target_temperature_c: Optional[float] = Field(default=None, le=44.0)
+    target_temperature_c: Optional[float] = Field(default=None, ge=0.0, le=44.0)
     vibration_intensity: Optional[int] = Field(default=None, ge=0, le=100)
     vibration_mode: Optional[str] = Field(default="pulse", max_length=32)
     pain_before: Optional[int] = Field(default=None, ge=0, le=10)
     pain_after: Optional[int] = Field(default=None, ge=0, le=10)
     feedback: Optional[TherapyFeedbackEnum] = None
+
+    @field_validator("started_at", "ended_at", mode="after")
+    @classmethod
+    def ensure_utc(cls, v: Optional[datetime]) -> Optional[datetime]:
+        if v is not None and v.tzinfo is None:
+            return v.replace(tzinfo=timezone.utc)
+        return v
 
     @model_validator(mode="after")
     def validate_session_dates(self) -> "TherapySessionCreate":
@@ -54,6 +61,13 @@ class TherapySessionUpdate(BaseModel):
     pain_after: Optional[int] = Field(default=None, ge=0, le=10)
     feedback: Optional[TherapyFeedbackEnum] = None
 
+    @field_validator("ended_at", mode="after")
+    @classmethod
+    def ensure_utc(cls, v: Optional[datetime]) -> Optional[datetime]:
+        if v is not None and v.tzinfo is None:
+            return v.replace(tzinfo=timezone.utc)
+        return v
+
 
 class TherapySessionResponse(BaseModel):
     id: int
@@ -69,5 +83,12 @@ class TherapySessionResponse(BaseModel):
     pain_after: Optional[int] = None
     feedback: Optional[str] = None
     created_at: datetime
+
+    @field_validator("started_at", "ended_at", "created_at", mode="after")
+    @classmethod
+    def ensure_utc_response(cls, v: Optional[datetime]) -> Optional[datetime]:
+        if v is not None and v.tzinfo is None:
+            return v.replace(tzinfo=timezone.utc)
+        return v
 
     model_config = ConfigDict(from_attributes=True)

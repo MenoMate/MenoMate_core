@@ -11,15 +11,9 @@ from app.models.device import Device
 from app.models.profile import Profile
 from app.schemas.device import DeviceCreate, DeviceResponse
 
+from app.services.profile import get_or_create_profile
+
 router = APIRouter(prefix="/devices", tags=["Devices"])
-
-
-async def _ensure_profile_exists(db: AsyncSession, user_id: uuid.UUID) -> None:
-    stmt = select(Profile).where(Profile.user_id == user_id)
-    res = await db.execute(stmt)
-    if not res.scalar_one_or_none():
-        db.add(Profile(user_id=user_id))
-        await db.flush()
 
 
 @router.get(
@@ -47,17 +41,28 @@ async def register_device(
     current_user_id: uuid.UUID = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Device:
-    await _ensure_profile_exists(db, current_user_id)
+    await get_or_create_profile(db, current_user_id)
 
-    stmt = select(Device).where(
-        Device.device_identifier == payload.device_identifier,
-        Device.user_id == current_user_id,
-    )
+    # Check globally unique device_identifier
+    stmt = select(Device).where(Device.device_identifier == payload.device_identifier)
     res = await db.execute(stmt)
-    device = res.scalar_one_or_none()
+    existing_device = res.scalar_one_or_none()
 
     now = datetime.now(timezone.utc)
-    if device is None:
+    if existing_device is not None:
+        if existing_device.user_id != current_user_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Device identifier is already registered to another user account.",
+            )
+        # Update existing paired device for current user
+        if payload.name is not None:
+            existing_device.name = payload.name
+        if payload.firmware_version is not None:
+            existing_device.firmware_version = payload.firmware_version
+        existing_device.last_connected_at = now
+        device = existing_device
+    else:
         device = Device(
             user_id=current_user_id,
             device_identifier=payload.device_identifier,
@@ -66,12 +71,6 @@ async def register_device(
             last_connected_at=now,
         )
         db.add(device)
-    else:
-        if payload.name is not None:
-            device.name = payload.name
-        if payload.firmware_version is not None:
-            device.firmware_version = payload.firmware_version
-        device.last_connected_at = now
 
     await db.commit()
     await db.refresh(device)
