@@ -1,5 +1,6 @@
 import uuid
-from typing import List
+from datetime import date
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +34,35 @@ def _to_cycle_response(cycle: Cycle) -> CycleResponse:
     )
 
 
+async def _check_cycle_overlap(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    period_start: date,
+    period_end: Optional[date],
+    exclude_cycle_id: Optional[int] = None,
+) -> None:
+    stmt = select(Cycle).where(Cycle.user_id == user_id)
+    if exclude_cycle_id is not None:
+        stmt = stmt.where(Cycle.id != exclude_cycle_id)
+    res = await db.execute(stmt)
+    existing_cycles = res.scalars().all()
+
+    today = date.today()
+    effective_end = period_end or today
+    for ec in existing_cycles:
+        ec_effective_end = ec.period_end or today
+        if period_start == ec.period_start:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"A period already exists starting on {period_start}.",
+            )
+        if max(period_start, ec.period_start) <= min(effective_end, ec_effective_end):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Specified period range ({period_start} to {period_end or 'ongoing'}) overlaps with existing period ({ec.period_start} to {ec.period_end or 'ongoing'}).",
+            )
+
+
 @router.get(
     "/current",
     response_model=CurrentCycleResponse,
@@ -50,9 +80,11 @@ async def get_current_cycle(
         is_bleeding=summary["is_bleeding"],
         latest_period_start=summary.get("latest_period_start"),
         latest_period_end=summary.get("latest_period_end"),
+        predicted_cycle_length=summary.get("predicted_cycle_length"),
         predicted_next_period=summary["predicted_next_period"],
         days_until_next_period=summary["days_until_next_period"],
         prediction_confidence=summary["prediction_confidence"],
+        prediction_source=summary.get("prediction_source"),
         average_cycle_length=summary["average_cycle_length"],
         average_period_length=summary["average_period_length"],
     )
@@ -95,6 +127,14 @@ async def create_cycle(
         db.add(Profile(user_id=current_user_id))
         await db.flush()
 
+    # Overlapping period check
+    await _check_cycle_overlap(
+        db=db,
+        user_id=current_user_id,
+        period_start=payload.period_start,
+        period_end=payload.period_end,
+    )
+
     cycle = Cycle(
         user_id=current_user_id,
         period_start=payload.period_start,
@@ -135,6 +175,15 @@ async def update_cycle(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="period_end cannot be prior to period_start",
         )
+
+    # Check overlap with other periods for this user
+    await _check_cycle_overlap(
+        db=db,
+        user_id=current_user_id,
+        period_start=new_start,
+        period_end=new_end,
+        exclude_cycle_id=cycle_id,
+    )
 
     if payload.period_start is not None:
         cycle.period_start = payload.period_start

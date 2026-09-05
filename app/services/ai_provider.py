@@ -20,6 +20,7 @@ class MockAIProvider(BaseAIProvider):
     """
     Mock AI Provider providing safe, empathetic, non-diagnostic guidance
     for development, testing, and offline environments.
+    Strictly avoids clinical diagnoses or prescribing medication.
     """
     async def generate_reply(
         self,
@@ -33,31 +34,33 @@ class MockAIProvider(BaseAIProvider):
 
         if "cramp" in msg_lower or "pain" in msg_lower or intent == "pain_help":
             return (
-                f"I hear you. During day {cycle_day} ({phase} phase), cramping can be particularly challenging. "
-                "Gentle heat therapy (like a warm compress or our wearable's safe pulse setting), staying hydrated, "
-                "and restful breathing can help soothe the abdominal muscles. If your pain feels unusually sharp or severe, "
-                "please check in with a healthcare professional."
+                f"Around day {cycle_day} ({phase} phase), cramping can feel uncomfortable. "
+                "Some people find that gentle warmth (like a warm compress or our wearable's safe thermal setting), "
+                "light movement, or resting in a comfortable position can offer comfort. "
+                "If pain feels unusually sharp or severe, please consider speaking with a healthcare professional."
             )
         elif "tired" in msg_lower or "fatigue" in msg_lower:
             return (
-                f"Feeling low energy around day {cycle_day} ({phase} phase) is very common as hormonal shifts alter your metabolic rhythm. "
-                "Prioritize magnesium-rich snacks, gentle stretching, and an early night. Listen to your body and rest without guilt."
+                f"Feeling low energy around day {cycle_day} ({phase} phase) is something many people experience. "
+                "Light stretching, staying well-hydrated, and taking extra time for rest may help you feel more restored. "
+                "If fatigue feels persistent or overwhelming, consider speaking with a healthcare provider."
             )
         elif "nausea" in msg_lower:
             return (
-                f"Mild nausea can occasionally accompany hormonal changes in the {phase} phase. "
-                "Small, frequent sips of ginger or peppermint tea and bland snacks like crackers can provide relief. "
-                "If nausea is persistent or accompanied by fever, consult a medical provider."
+                f"Mild nausea can sometimes occur around this time. Small, frequent sips of water or herbal tea "
+                "and plain snacks may feel soothing. If nausea persists or is severe, consult a medical provider."
             )
         elif "mood" in msg_lower:
             return (
-                f"Experiencing mood fluctuations during the {phase} phase is completely natural. "
-                "Allow yourself space to unwind, step outside for fresh air, and engage in calming routines."
+                f"Mood shifts can happen during different parts of your cycle. "
+                "Taking quiet moments for yourself, gentle walks, and prioritizing sleep may help you feel more grounded. "
+                "If mood changes feel unmanageable, a professional can offer personalized support."
             )
         else:
             return (
-                f"Thank you for sharing. In your {phase} phase (cycle day {cycle_day}), keeping track of your bodily changes "
-                "helps build a clearer picture of your wellness rhythms. How else can I support your comfort today?"
+                f"Thank you for checking in. In your {phase} phase (cycle day {cycle_day}), tracking your symptoms "
+                "helps build a clearer picture of your personal rhythms. If you ever have health concerns, "
+                "a healthcare provider is best suited to guide you. How else can I support your comfort today?"
             )
 
 

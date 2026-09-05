@@ -40,10 +40,13 @@ async def get_current_cycle_summary(
 
     # 3. Calculate completed cycle lengths & prediction
     cycle_lengths = calculate_cycle_lengths(all_periods)
-    predicted_length, confidence, variability = predict_next_cycle(
+    prediction = predict_next_cycle(
         completed_cycle_lengths=cycle_lengths,
         usual_cycle_days=usual_cycle,
     )
+    predicted_length = prediction.predicted_cycle_length
+    confidence = prediction.confidence
+    source = prediction.source
 
     # 4. Determine latest period and current state
     if not all_periods:
@@ -52,9 +55,11 @@ async def get_current_cycle_summary(
             "current_cycle_day": None,
             "phase": "unknown",
             "is_bleeding": False,
+            "predicted_cycle_length": None,
             "predicted_next_period": None,
             "days_until_next_period": None,
             "prediction_confidence": "insufficient_data",
+            "prediction_source": "insufficient_data",
             "average_cycle_length": usual_cycle,
             "average_period_length": usual_period,
             "today_log": None,
@@ -66,8 +71,12 @@ async def get_current_cycle_summary(
     is_bleeding = (latest_period.period_end is None) or (today <= latest_period.period_end)
     current_cycle_day = max(1, (today - latest_period.period_start).days + 1)
     
-    predicted_next_period = latest_period.period_start + timedelta(days=predicted_length)
-    days_until_next_period = (predicted_next_period - today).days
+    if predicted_length is not None:
+        predicted_next_period = latest_period.period_start + timedelta(days=predicted_length)
+        days_until_next_period = (predicted_next_period - today).days
+    else:
+        predicted_next_period = None
+        days_until_next_period = None
 
     # Calculate average period length
     completed_periods = [p for p in all_periods if p.period_end]
@@ -84,7 +93,7 @@ async def get_current_cycle_summary(
         period_length=avg_period_len,
     )
 
-    avg_cycle_len = round(sum(cycle_lengths) / len(cycle_lengths)) if cycle_lengths else (usual_cycle or 28)
+    avg_cycle_len = round(sum(cycle_lengths) / len(cycle_lengths)) if cycle_lengths else (usual_cycle or None)
 
     # 5. Fetch today's daily log
     today_log_stmt = (
@@ -123,9 +132,11 @@ async def get_current_cycle_summary(
         "is_bleeding": is_bleeding,
         "latest_period_start": latest_period.period_start,
         "latest_period_end": latest_period.period_end,
+        "predicted_cycle_length": predicted_length,
         "predicted_next_period": predicted_next_period,
         "days_until_next_period": days_until_next_period,
         "prediction_confidence": confidence,
+        "prediction_source": source,
         "average_cycle_length": avg_cycle_len,
         "average_period_length": avg_period_len,
         "today_log": today_log,
@@ -178,7 +189,8 @@ async def get_history_summary(
     avg_period = round(sum(period_lens) / len(period_lens), 1) if period_lens else None
 
     # Variability std dev
-    _, _, variability = predict_next_cycle(cycle_lengths)
+    pred = predict_next_cycle(cycle_lengths)
+    variability = pred.variability_std_dev
 
     return {
         "total_periods_logged": len(periods),

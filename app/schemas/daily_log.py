@@ -1,8 +1,8 @@
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from enum import Enum
 from typing import List, Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class FlowEnum(str, Enum):
@@ -44,10 +44,22 @@ SUPPORTED_SYMPTOMS = [
     {"id": "dizziness", "display_name": "Dizziness / Lightheadedness", "category": "general"},
 ]
 
+SUPPORTED_SYMPTOM_IDS = {s["id"] for s in SUPPORTED_SYMPTOMS}
+
 
 class SymptomItem(BaseModel):
     symptom_type: str = Field(..., max_length=64)
     severity: int = Field(default=0, ge=0, le=10, description="Severity score 0 to 10")
+
+    @field_validator("symptom_type")
+    @classmethod
+    def validate_symptom_type(cls, v: str) -> str:
+        clean_v = v.strip().lower()
+        if clean_v not in SUPPORTED_SYMPTOM_IDS:
+            raise ValueError(
+                f"Unsupported symptom_type '{v}'. Supported: {sorted(SUPPORTED_SYMPTOM_IDS)}"
+            )
+        return clean_v
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -60,6 +72,13 @@ class DailyLogCreate(BaseModel):
     flow: Optional[FlowEnum] = None
     symptoms: List[SymptomItem] = Field(default_factory=list, description="Child symptom records")
     notes: Optional[str] = Field(default=None, max_length=1000)
+
+    @field_validator("log_date")
+    @classmethod
+    def validate_log_date(cls, v: Optional[date]) -> Optional[date]:
+        if v and v > date.today() + timedelta(days=1):
+            raise ValueError("log_date cannot be in the future")
+        return v
 
 
 class DailyLogUpdate(BaseModel):

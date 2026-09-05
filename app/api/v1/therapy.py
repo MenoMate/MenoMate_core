@@ -1,5 +1,6 @@
 import uuid
 from datetime import date, datetime, timezone
+from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -67,6 +68,24 @@ async def recommend_therapy(
         sensitivity_index=profile.sensitivity_index,
     )
     return TherapyRecommendationResponse(**rec)
+
+
+@router.get(
+    "/sessions",
+    response_model=List[TherapySessionResponse],
+    summary="List all wearable therapy sessions for user",
+)
+async def list_therapy_sessions(
+    current_user_id: uuid.UUID = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> List[TherapySession]:
+    stmt = (
+        select(TherapySession)
+        .where(TherapySession.user_id == current_user_id)
+        .order_by(TherapySession.started_at.desc())
+    )
+    res = await db.execute(stmt)
+    return list(res.scalars().all())
 
 
 @router.post(

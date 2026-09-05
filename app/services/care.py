@@ -23,7 +23,7 @@ async def handle_care_interaction(
     """
     Care interaction router:
     1. Resolves simple questions deterministically using backend calculations.
-    2. Builds compact context and queries the AI provider for personalized questions.
+    2. Builds compact intent-specific context and queries the AI provider for personalized guidance.
     3. Guarantees non-diagnostic safety guardrails and medical disclaimers.
     """
     msg = (user_message or "").strip().lower()
@@ -39,7 +39,7 @@ async def handle_care_interaction(
         if not summary.get("has_data"):
             return {
                 "intent": intent,
-                "response_text": "You haven't logged a period yet. Complete onboarding or log a period start to see cycle projections.",
+                "response_text": "You have not logged a period yet. Complete onboarding or log a period start to see cycle projections.",
                 "is_ai_generated": False,
                 "suggested_actions": ["Log Period Start"],
                 "disclaimer": MEDICAL_DISCLAIMER,
@@ -51,10 +51,17 @@ async def handle_care_interaction(
         days_left = summary["days_until_next_period"]
         conf = summary["prediction_confidence"]
         
-        reply = (
-            f"You are currently on Day {cycle_day} of your cycle, in the {phase.capitalize()} phase. "
-            f"Your next estimated period is around {next_p} (in approximately {days_left} days, confidence: {conf})."
-        )
+        if next_p:
+            reply = (
+                f"You are currently on Day {cycle_day} of your cycle, in the {phase.capitalize()} phase. "
+                f"Your next estimated period is around {next_p} (in approximately {days_left} days, confidence: {conf})."
+            )
+        else:
+            reply = (
+                f"You are currently on Day {cycle_day} of your cycle, in the {phase.capitalize()} phase. "
+                "More cycle logs are needed before a reliable next-period prediction can be estimated."
+            )
+
         return {
             "intent": intent,
             "response_text": reply,
@@ -90,8 +97,8 @@ async def handle_care_interaction(
             "disclaimer": MEDICAL_DISCLAIMER,
         }
 
-    # --- 2. Personalized Inquiries -> AI Provider with Compact Context ---
-    context = await build_care_context(db, user_id, days_back=3)
+    # --- 2. Personalized Inquiries -> AI Provider with Compact Intent-Tailored Context ---
+    context = await build_care_context(db, user_id, intent=intent)
     provider = get_ai_provider()
     prompt_text = user_message or f"Intent: {intent}"
     
@@ -102,7 +109,7 @@ async def handle_care_interaction(
     )
 
     suggested = []
-    if "cramp" in prompt_text.lower() or intent == "pain_help":
+    if "cramp" in prompt_text.lower() or intent in ("pain_help", "therapy"):
         suggested.append("Start Thermal Therapy")
     suggested.append("Log Daily Symptoms")
 

@@ -68,7 +68,13 @@ async def update_profile(
 @router.delete(
     "",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete user profile and all associated data (GDPR / Privacy)",
+    summary="Delete user application profile and all associated data",
+    description=(
+        "Deletes the user profile record from PostgreSQL, cascading deletion across all associated "
+        "application records (cycles, daily logs, therapy sessions, devices). "
+        "Note: This removes PostgreSQL application data only; complete Supabase Auth user deletion "
+        "requires Supabase Admin/Service-Role API invocation."
+    ),
 )
 async def delete_profile(
     current_user_id: uuid.UUID = Depends(get_current_user),

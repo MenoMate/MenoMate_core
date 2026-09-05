@@ -1,8 +1,14 @@
 from datetime import date, timedelta
 import math
-from typing import List, Optional, Tuple
+from typing import List, NamedTuple, Optional, Tuple
 from app.models.cycle import Cycle
-from app.models.profile import Profile
+
+
+class CyclePrediction(NamedTuple):
+    predicted_cycle_length: Optional[int]
+    confidence: str
+    variability_std_dev: Optional[float]
+    source: str
 
 
 def calculate_period_length(cycle: Cycle) -> Optional[int]:
@@ -36,16 +42,31 @@ def calculate_cycle_lengths(periods: List[Cycle]) -> List[int]:
 def predict_next_cycle(
     completed_cycle_lengths: List[int],
     usual_cycle_days: Optional[int] = None,
-) -> Tuple[int, str, Optional[float]]:
+) -> CyclePrediction:
     """
     Predicts next cycle length using a transparent Weighted Moving Average (WMA)
     over recent completed cycles (inspired by Mētra/Mensinator principles).
-    Returns (predicted_cycle_length, confidence, variability_std_dev).
+    
+    Returns CyclePrediction(predicted_cycle_length, confidence, variability_std_dev, source).
+    - If sufficient history: calculates WMA from recent cycles (source="history").
+    - If 0 history but user set a baseline: uses usual_cycle_days (source="usual_cycle", confidence="low").
+    - If 0 history and no baseline: returns predicted_cycle_length=None, source="insufficient_data".
+      Does not return an arbitrary 28-day estimate as personalized prediction.
     """
     if not completed_cycle_lengths:
         if usual_cycle_days and 20 <= usual_cycle_days <= 45:
-            return usual_cycle_days, "low", None
-        return 28, "insufficient_data", None
+            return CyclePrediction(
+                predicted_cycle_length=usual_cycle_days,
+                confidence="low",
+                variability_std_dev=None,
+                source="usual_cycle",
+            )
+        return CyclePrediction(
+            predicted_cycle_length=None,
+            confidence="insufficient_data",
+            variability_std_dev=None,
+            source="insufficient_data",
+        )
 
     # Use up to the 6 most recent completed cycles (most recent last)
     recent = completed_cycle_lengths[-6:]
@@ -80,12 +101,17 @@ def predict_next_cycle(
     else:
         confidence = "low"
 
-    return predicted_length, confidence, std_dev
+    return CyclePrediction(
+        predicted_cycle_length=predicted_length,
+        confidence=confidence,
+        variability_std_dev=std_dev,
+        source="history",
+    )
 
 
 def estimate_phase(
     cycle_day: int,
-    cycle_length: int,
+    cycle_length: Optional[int],
     is_bleeding: bool,
     period_length: int = 5,
 ) -> str:
@@ -97,7 +123,8 @@ def estimate_phase(
     if is_bleeding or cycle_day <= period_length:
         return "menstrual"
 
-    ovulation_day = max(period_length + 2, cycle_length - 14)
+    effective_length = cycle_length if (cycle_length and 20 <= cycle_length <= 45) else 28
+    ovulation_day = max(period_length + 2, effective_length - 14)
 
     if cycle_day < ovulation_day - 1:
         return "follicular"

@@ -10,13 +10,13 @@ from app.db.session import engine
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Safe startup schema creation (e.g. for dev/sqlite/test environments)
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-    except Exception as e:
-        # In remote Postgres environments without DDL permissions, logs and continues
-        print(f"Database schema initialization warning: {e}")
+    # Only run automatic schema creation if explicitly configured or running on local SQLite
+    if settings.AUTO_CREATE_TABLES or engine.dialect.name == "sqlite":
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+        except Exception as e:
+            print(f"Database schema initialization warning: {e}")
     yield
     await engine.dispose()
 

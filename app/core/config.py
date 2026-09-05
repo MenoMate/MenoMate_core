@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     SUPABASE_URL: str = "https://your-project-ref.supabase.co"
     
     ALLOWED_ORIGINS: Union[List[str], str] = "*"
+    AUTO_CREATE_TABLES: bool = False
     
     @field_validator("ALLOWED_ORIGINS", mode="before")
     @classmethod

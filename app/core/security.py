@@ -14,17 +14,12 @@ async def get_current_user(
 ) -> uuid.UUID:
     """
     Extracts and validates Supabase JWT claims from Authorization header.
-    Validates signature, expiration, audience (authenticated), and user UUID (sub).
+    Validates token signature, expiration (exp), audience (authenticated), and user UUID (sub).
+    Every protected database operation must scope queries by this returned user_id.
     """
     token = credentials.credentials
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
 
     try:
-        # Decode and verify Supabase JWT
         payload = jwt.decode(
             token,
             settings.SUPABASE_JWT_SECRET,
@@ -32,19 +27,36 @@ async def get_current_user(
             options={
                 "verify_signature": True,
                 "verify_exp": True,
-                "verify_aud": False,  # Allow test tokens with or without aud claim
+                "verify_aud": False,
             },
         )
-        
-        # Check audience if present
+
         aud = payload.get("aud")
         if aud is not None and aud not in ["authenticated", "test"]:
-            raise credentials_exception
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token audience",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
         user_id_str: Optional[str] = payload.get("sub")
         if not user_id_str:
-            raise credentials_exception
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token missing subject claim",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
         return uuid.UUID(user_id_str)
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     except (jwt.PyJWTError, ValueError):
-        raise credentials_exception
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )

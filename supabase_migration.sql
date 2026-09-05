@@ -1,9 +1,17 @@
 -- =============================================================================
--- MenoMate Core - Supabase PostgreSQL Safe Schema Migration
--- Designed for Supabase Session Pooler (Transaction / Session mode)
+-- MenoMate Core - Supabase PostgreSQL Safe Non-Destructive Schema Migration
+-- Purpose: Safely migrates an existing Supabase database from the legacy schema
+--          (e.g., profiles.id, cycles.start_date, cycles.end_date)
+--          to the canonical menomate-core schema without data loss.
+-- Note: For brand-new Supabase projects, execute supabase_initial_schema.sql instead.
 -- =============================================================================
 
--- 1. Profiles table
+-- Enable UUID extension if not present
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- -----------------------------------------------------------------------------
+-- 1. Profiles Table Migration
+-- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.profiles (
     user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     name VARCHAR(128),
@@ -16,16 +24,33 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- In case profiles was already created with old schema, add new columns safely
+-- If table was created under legacy schema with column 'id' instead of 'user_id'
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' AND table_name = 'profiles' AND column_name = 'id'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' AND table_name = 'profiles' AND column_name = 'user_id'
+    ) THEN
+        ALTER TABLE public.profiles RENAME COLUMN id TO user_id;
+    END IF;
+END $$;
+
+-- Add any missing columns safely
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS name VARCHAR(128);
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS usual_cycle_days INTEGER;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS usual_period_days INTEGER;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS theme VARCHAR(32) DEFAULT 'system';
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS units VARCHAR(32) DEFAULT 'metric';
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS sensitivity_index DOUBLE PRECISION DEFAULT 1.0;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
 
--- 2. Cycles table (menstrual bleeding period occurrences)
+-- -----------------------------------------------------------------------------
+-- 2. Cycles Table Migration
+-- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.cycles (
     id SERIAL PRIMARY KEY,
     user_id UUID NOT NULL REFERENCES public.profiles(user_id) ON DELETE CASCADE,
@@ -35,9 +60,35 @@ CREATE TABLE IF NOT EXISTS public.cycles (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Rename legacy column start_date -> period_start if present
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' AND table_name = 'cycles' AND column_name = 'start_date'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' AND table_name = 'cycles' AND column_name = 'period_start'
+    ) THEN
+        ALTER TABLE public.cycles RENAME COLUMN start_date TO period_start;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' AND table_name = 'cycles' AND column_name = 'end_date'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' AND table_name = 'cycles' AND column_name = 'period_end'
+    ) THEN
+        ALTER TABLE public.cycles RENAME COLUMN end_date TO period_end;
+    END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_cycles_user_start ON public.cycles(user_id, period_start);
 
--- 3. Daily Logs table
+-- -----------------------------------------------------------------------------
+-- 3. Daily Logs Table
+-- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.daily_logs (
     id SERIAL PRIMARY KEY,
     user_id UUID NOT NULL REFERENCES public.profiles(user_id) ON DELETE CASCADE,
@@ -54,7 +105,9 @@ CREATE TABLE IF NOT EXISTS public.daily_logs (
 
 CREATE INDEX IF NOT EXISTS idx_daily_logs_user_date ON public.daily_logs(user_id, log_date);
 
--- 4. Symptom Logs (child symptoms of daily logs)
+-- -----------------------------------------------------------------------------
+-- 4. Symptom Logs Table (Child records of daily logs)
+-- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.symptom_logs (
     id SERIAL PRIMARY KEY,
     daily_log_id INTEGER NOT NULL REFERENCES public.daily_logs(id) ON DELETE CASCADE,
@@ -64,7 +117,9 @@ CREATE TABLE IF NOT EXISTS public.symptom_logs (
 
 CREATE INDEX IF NOT EXISTS idx_symptom_logs_daily_log ON public.symptom_logs(daily_log_id);
 
--- 5. Devices table (persistent BLE wearable association)
+-- -----------------------------------------------------------------------------
+-- 5. Devices Table (Wearable BLE hardware association)
+-- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.devices (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES public.profiles(user_id) ON DELETE CASCADE,
@@ -78,7 +133,9 @@ CREATE TABLE IF NOT EXISTS public.devices (
 
 CREATE INDEX IF NOT EXISTS idx_devices_user ON public.devices(user_id);
 
--- 6. Therapy Sessions table
+-- -----------------------------------------------------------------------------
+-- 6. Therapy Sessions Table
+-- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.therapy_sessions (
     id SERIAL PRIMARY KEY,
     user_id UUID NOT NULL REFERENCES public.profiles(user_id) ON DELETE CASCADE,
@@ -97,7 +154,9 @@ CREATE TABLE IF NOT EXISTS public.therapy_sessions (
 
 CREATE INDEX IF NOT EXISTS idx_therapy_sessions_user ON public.therapy_sessions(user_id);
 
--- 7. Care Chat Conversations
+-- -----------------------------------------------------------------------------
+-- 7. Chat Conversations Table
+-- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.chat_conversations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES public.profiles(user_id) ON DELETE CASCADE,
@@ -106,7 +165,11 @@ CREATE TABLE IF NOT EXISTS public.chat_conversations (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 8. Care Chat Messages
+CREATE INDEX IF NOT EXISTS idx_chat_conversations_user ON public.chat_conversations(user_id);
+
+-- -----------------------------------------------------------------------------
+-- 8. Chat Messages Table
+-- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.chat_messages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     conversation_id UUID NOT NULL REFERENCES public.chat_conversations(id) ON DELETE CASCADE,

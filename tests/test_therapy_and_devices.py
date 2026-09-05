@@ -1,6 +1,8 @@
 import pytest
 from httpx import AsyncClient
 
+from tests.conftest import ANOTHER_USER_ID, TEST_USER_ID
+
 
 @pytest.mark.asyncio
 async def test_device_lifecycle(async_client: AsyncClient, auth_headers: dict):
@@ -30,6 +32,51 @@ async def test_device_lifecycle(async_client: AsyncClient, auth_headers: dict):
     # 4. Confirm unpairing
     list_res2 = await async_client.get("/api/v1/devices", headers=auth_headers)
     assert len(list_res2.json()) == 0
+
+
+@pytest.mark.asyncio
+async def test_cross_user_device_and_session_isolation(
+    async_client: AsyncClient, auth_headers: dict, other_user_auth_headers: dict
+):
+    # User 1 registers device
+    reg_res = await async_client.post(
+        "/api/v1/devices",
+        headers=auth_headers,
+        json={"device_identifier": "11:22:33:44:55:66", "name": "User 1 Band"},
+    )
+    assert reg_res.status_code == 201
+    u1_device_id = reg_res.json()["id"]
+
+    # User 2 lists devices -> cannot see User 1's device
+    u2_devices = await async_client.get("/api/v1/devices", headers=other_user_auth_headers)
+    assert u2_devices.status_code == 200
+    assert len(u2_devices.json()) == 0
+
+    # User 2 cannot unpair User 1's device
+    u2_del = await async_client.delete(f"/api/v1/devices/{u1_device_id}", headers=other_user_auth_headers)
+    assert u2_del.status_code == 404
+
+    # User 1 creates therapy session
+    s_res = await async_client.post(
+        "/api/v1/therapy/sessions",
+        headers=auth_headers,
+        json={"mode": "standard", "target_temperature_c": 39.0, "vibration_intensity": 50},
+    )
+    assert s_res.status_code == 201
+    u1_session_id = s_res.json()["id"]
+
+    # User 2 lists sessions -> empty
+    u2_sessions = await async_client.get("/api/v1/therapy/sessions", headers=other_user_auth_headers)
+    assert u2_sessions.status_code == 200
+    assert len(u2_sessions.json()) == 0
+
+    # User 2 cannot patch User 1's session
+    u2_patch = await async_client.patch(
+        f"/api/v1/therapy/sessions/{u1_session_id}",
+        headers=other_user_auth_headers,
+        json={"pain_after": 1},
+    )
+    assert u2_patch.status_code == 404
 
 
 @pytest.mark.asyncio

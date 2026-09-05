@@ -158,24 +158,26 @@ async def update_daily_log(
     if not daily_log:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Daily log not found")
 
-    if payload.pain is not None:
+    # Use model_fields_set to distinguish between unspecified fields and explicitly supplied nulls
+    fields_set = payload.model_fields_set
+
+    if "pain" in fields_set and payload.pain is not None:
         daily_log.pain = payload.pain
-    if payload.mood is not None:
-        daily_log.mood = payload.mood.value
-    if payload.discharge is not None:
-        daily_log.discharge = payload.discharge.value
-    if payload.flow is not None:
-        daily_log.flow = payload.flow.value
-    if payload.notes is not None:
+    if "mood" in fields_set:
+        daily_log.mood = payload.mood.value if payload.mood else None
+    if "discharge" in fields_set:
+        daily_log.discharge = payload.discharge.value if payload.discharge else None
+    if "flow" in fields_set:
+        daily_log.flow = payload.flow.value if payload.flow else None
+    if "notes" in fields_set:
         daily_log.notes = payload.notes
 
-    if payload.symptoms is not None:
+    if "symptoms" in fields_set:
         daily_log.symptoms = [
             SymptomLog(symptom_type=item.symptom_type, severity=item.severity)
-            for item in payload.symptoms
+            for item in (payload.symptoms or [])
         ]
 
     await db.commit()
     await db.refresh(daily_log, ["symptoms"])
     return daily_log
-
