@@ -38,6 +38,11 @@ async def test_api_contract_all_routes_registered(async_client: AsyncClient):
         "/api/v1/care/interactions": ["post"],
     }
 
+    # Validate exact route and operation counts
+    assert len(expected_endpoints) == 18, f"Expected 18 unique API v1 paths, found {len(expected_endpoints)}"
+    total_ops = sum(len(methods) for methods in expected_endpoints.values())
+    assert total_ops == 24, f"Expected 24 total API v1 operations, found {total_ops}"
+
     for path, methods in expected_endpoints.items():
         assert path in paths, f"Endpoint {path} missing from API contract"
         for method in methods:

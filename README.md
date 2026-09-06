@@ -86,7 +86,11 @@ The database is structured in PostgreSQL with foreign keys cascading from `profi
 
 ## API Endpoints
 
-All endpoints except `/health` and OpenAPI documentation require a valid Supabase JWT Bearer token in the `Authorization` header.
+The API defines **26 total operations across 20 unique URL paths**:
+- **24 Production API v1 Operations** across 18 unique `/api/v1/...` paths (23 authenticated user-scoped operations and 1 public symptom taxonomy).
+- **2 Root / Health Operations** (`GET /` and `GET /health`).
+
+All endpoints except `/health`, `/`, and `GET /api/v1/symptoms` require a valid Supabase JWT Bearer token in the `Authorization` header.
 
 ### Authentication & Profile
 - `GET /api/v1/auth/me`: Retrieve authenticated user identity and profile.
