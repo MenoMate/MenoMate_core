@@ -1,9 +1,10 @@
-from typing import List, Union
+from typing import List, Optional, Union
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 INSECURE_PLACEHOLDER_SECRETS = {
     "your-supabase-jwt-secret",
+    "your-supabase-jwt-secret-here",
     "change-me",
     "secret",
     "placeholder",
@@ -20,11 +21,18 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
 
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/postgres"
-    SUPABASE_JWT_SECRET: str
     SUPABASE_URL: str
+    SUPABASE_JWT_SECRET: Optional[str] = None
+    SUPABASE_JWKS_URL: Optional[str] = None
 
     ALLOWED_ORIGINS: Union[List[str], str] = "*"
     AUTO_CREATE_TABLES: bool = False
+
+    @property
+    def jwks_url(self) -> str:
+        if self.SUPABASE_JWKS_URL and self.SUPABASE_JWKS_URL.strip():
+            return self.SUPABASE_JWKS_URL.strip()
+        return f"{self.SUPABASE_URL.rstrip('/')}/auth/v1/.well-known/jwks.json"
 
     @field_validator("ALLOWED_ORIGINS", mode="before")
     @classmethod
@@ -46,12 +54,13 @@ class Settings(BaseSettings):
                 "A real Supabase project URL is required for production authentication."
             )
 
-        secret = (self.SUPABASE_JWT_SECRET or "").strip()
-        if not secret or secret in INSECURE_PLACEHOLDER_SECRETS:
-            raise ValueError(
-                "Insecure configuration: SUPABASE_JWT_SECRET is missing or set to an unconfigured placeholder. "
-                "A secure production JWT secret is required."
-            )
+        if self.SUPABASE_JWT_SECRET is not None and self.SUPABASE_JWT_SECRET.strip():
+            secret = self.SUPABASE_JWT_SECRET.strip()
+            if secret in INSECURE_PLACEHOLDER_SECRETS or "your-supabase-jwt-secret" in secret:
+                raise ValueError(
+                    "Insecure configuration: SUPABASE_JWT_SECRET is set to an unconfigured placeholder. "
+                    "A secure production JWT secret is required when symmetric signing is configured."
+                )
 
         return self
 

@@ -189,7 +189,7 @@ All endpoints except `/health` and OpenAPI documentation require a valid Supabas
 |---|---|---|---|
 | `PROJECT_NAME` | No | Service name identifier (default `MenoMate Core Backend`) | Server-side only |
 | `DATABASE_URL` | Yes | PostgreSQL connection string (`postgresql+asyncpg://...`) | Server-side only |
-| `SUPABASE_JWT_SECRET` | Yes | Supabase JWT secret used for legacy/symmetric HS256 verification when applicable | Server-side only |
+| `SUPABASE_JWT_SECRET` | Optional | Supabase JWT secret used for legacy/symmetric HS256 verification. Optional when asymmetric ES256/RS256 signing is used. | Server-side only |
 | `SUPABASE_URL` | Yes | Base URL of the Supabase project (used for issuer and JWKS discovery) | Server-side only |
 | `ALLOWED_ORIGINS` | No | Allowed CORS origins (comma-separated list or `*`, default `*`) | Server-side only |
 | `AUTO_CREATE_TABLES` | No | Automatically run DDL on startup (default `false`) | Server-side only |
@@ -224,6 +224,7 @@ menomate-core/
 │   └── main.py                      # FastAPI application entry point
 ├── tests/                           # Pytest test suite
 ├── supabase_initial_schema.sql      # Canonical DDL for fresh databases
+├── live_schema_migration.sql        # Non-destructive idempotent migration for live DB
 ├── supabase_migration.sql           # Non-destructive migration script
 ├── THIRD_PARTY_NOTICES.md           # Open-source attributions and licenses
 ├── requirements.txt                 # Minimum supported dependency versions
@@ -251,8 +252,8 @@ Patient safety is fundamental to the MenoMate platform:
   - Deterministic therapy recommendation engine with 44.0 C safety ceiling, device ownership verification, and single feedback application
   - Wearable device association and therapy session tracking
   - Stateless AI care assistant with intent-tailored context and cautious phrasing (ChatConversation/ChatMessage tables reserved for future multi-turn persistence)
-  - Clean separation between fresh schema DDL and legacy migration scripts
-  - Comprehensive automated test suite (57 tests covering auth, cycles, logs, therapy, onboarding, care, and emergency safety triage)
+  - Clean separation between fresh schema DDL and live idempotent migration scripts
+  - Comprehensive automated test suite (82 tests covering JWT auth requirements A–T, API contract regression, cycles, logs, therapy, onboarding, care, and emergency safety triage)
 
 - In Progress:
   - Integration with the Flutter mobile client (`menomate-mobile`)
