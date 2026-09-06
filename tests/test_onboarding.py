@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @pytest.mark.asyncio
@@ -128,3 +129,95 @@ async def test_onboarding_cycle_validation_parity_and_overlap(async_client: Asyn
     )
     assert res_overlap.status_code == 400
     assert "overlaps with existing period" in res_overlap.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_onboarding_atomic_rollback_on_failure(
+    async_client: AsyncClient, db_session: AsyncSession, monkeypatch
+):
+    """
+    Verifies that if onboarding fails during cycle validation,
+    the staged profile is rolled back and NOT left behind in the database.
+    """
+    import uuid
+    from fastapi import HTTPException
+    from sqlalchemy import select
+    from app.models.profile import Profile
+    from tests.conftest import make_token
+    import app.api.v1.onboarding as ob_module
+
+    fresh_uid = uuid.uuid4()
+    headers = {"Authorization": f"Bearer {make_token(fresh_uid)}"}
+
+    # Confirm no profile exists in database
+    p_check = await db_session.execute(select(Profile).where(Profile.user_id == fresh_uid))
+    assert p_check.scalar_one_or_none() is None
+
+    # Simulate cycle validation failure inside complete_onboarding
+    async def mock_fail_check(*args, **kwargs):
+        raise HTTPException(status_code=400, detail="Simulated cycle validation failure")
+
+    monkeypatch.setattr(ob_module, "check_cycle_overlap", mock_fail_check)
+
+    res = await async_client.post(
+        "/api/v1/onboarding/complete",
+        headers=headers,
+        json={
+            "name": "Atomic Rollback User",
+            "last_period_start": str(date.today() - timedelta(days=3)),
+            "last_period_end": str(date.today()),
+            "usual_cycle_days": 28,
+            "usual_period_days": 5,
+        },
+    )
+    assert res.status_code == 400
+    assert "Simulated cycle validation failure" in res.json()["detail"]
+
+    # Verify profile was rolled back and is NOT present in database
+    p_after = await db_session.execute(select(Profile).where(Profile.user_id == fresh_uid))
+    assert p_after.scalar_one_or_none() is None, "Failed onboarding left an orphaned profile record!"
+
+
+@pytest.mark.asyncio
+async def test_onboarding_concurrent_requests_safe(
+    async_client: AsyncClient, db_session: AsyncSession
+):
+    """
+    Verifies that concurrent onboarding requests for the same new user
+    complete safely without unhandled conflicts or orphaned records.
+    """
+    import asyncio
+    import uuid
+    from sqlalchemy import select
+    from app.models.profile import Profile
+    from tests.conftest import make_token
+
+    fresh_uid = uuid.uuid4()
+    headers = {"Authorization": f"Bearer {make_token(fresh_uid)}"}
+
+    payload = {
+        "name": "Concurrent User",
+        "last_period_start": str(date.today() - timedelta(days=2)),
+        "last_period_end": str(date.today()),
+        "usual_cycle_days": 30,
+        "usual_period_days": 5,
+    }
+
+    # Execute 3 concurrent onboarding requests for the exact same new user
+    responses = await asyncio.gather(
+        async_client.post("/api/v1/onboarding/complete", headers=headers, json=payload),
+        async_client.post("/api/v1/onboarding/complete", headers=headers, json=payload),
+        async_client.post("/api/v1/onboarding/complete", headers=headers, json=payload),
+        return_exceptions=True,
+    )
+
+    for r in responses:
+        assert not isinstance(r, Exception)
+        assert r.status_code == 201
+        assert r.json()["message"] == "Onboarding completed successfully."
+
+    # Exactly one profile record should exist
+    prof_stmt = select(Profile).where(Profile.user_id == fresh_uid)
+    res = await db_session.execute(prof_stmt)
+    profiles = res.scalars().all()
+    assert len(profiles) == 1

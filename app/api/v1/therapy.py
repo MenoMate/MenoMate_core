@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from datetime import date, datetime, timezone
 from typing import List
@@ -158,6 +159,15 @@ async def log_therapy_session(
     return session
 
 
+_session_locks: dict[int, asyncio.Lock] = {}
+
+
+def _get_session_lock(session_id: int) -> asyncio.Lock:
+    if session_id not in _session_locks:
+        _session_locks[session_id] = asyncio.Lock()
+    return _session_locks[session_id]
+
+
 @router.patch(
     "/sessions/{session_id}",
     response_model=TherapySessionResponse,
@@ -173,43 +183,55 @@ async def update_therapy_session(
     current_user_id: uuid.UUID = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> TherapySession:
-    stmt = select(TherapySession).where(
-        TherapySession.id == session_id,
-        TherapySession.user_id == current_user_id,
-    )
-    res = await db.execute(stmt)
-    session = res.scalar_one_or_none()
-
-    if not session:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Therapy session not found")
-
-    if payload.ended_at is not None:
-        normalized_ended = _normalize_dt(payload.ended_at)
-        if session.started_at and normalized_ended < _normalize_dt(session.started_at):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="ended_at cannot be prior to started_at",
+    session_lock = _get_session_lock(session_id)
+    async with session_lock:
+        # Acquire row lock on session to prevent concurrent double-application of feedback
+        stmt = (
+            select(TherapySession)
+            .where(
+                TherapySession.id == session_id,
+                TherapySession.user_id == current_user_id,
             )
-        session.ended_at = normalized_ended
+            .with_for_update()
+        )
+        res = await db.execute(stmt)
+        session = res.scalar_one_or_none()
 
-    if payload.pain_after is not None:
-        session.pain_after = payload.pain_after
+        if not session:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Therapy session not found")
 
-    if payload.feedback is not None:
-        fb_val = payload.feedback.value if hasattr(payload.feedback, "value") else str(payload.feedback)
-        if session.feedback is not None:
-            if session.feedback != fb_val:
+        if payload.ended_at is not None:
+            normalized_ended = _normalize_dt(payload.ended_at)
+            if session.started_at and normalized_ended < _normalize_dt(session.started_at):
                 raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Therapy session feedback has already been recorded and is immutable.",
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="ended_at cannot be prior to started_at",
                 )
-            # Same feedback repeated is an idempotent no-op
-        else:
-            profile = await get_or_create_profile(db, current_user_id)
-            new_sens, _ = adjust_sensitivity(profile.sensitivity_index, fb_val)
-            profile.sensitivity_index = new_sens
-            session.feedback = fb_val
+            session.ended_at = normalized_ended
 
-    await db.commit()
-    await db.refresh(session)
-    return session
+        if payload.pain_after is not None:
+            session.pain_after = payload.pain_after
+
+        if payload.feedback is not None:
+            fb_val = payload.feedback.value if hasattr(payload.feedback, "value") else str(payload.feedback)
+            if session.feedback is not None:
+                if session.feedback != fb_val:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Therapy session feedback has already been recorded and is immutable.",
+                    )
+                # Same feedback repeated is an idempotent no-op
+            else:
+                # Row-lock profile as well to prevent race conditions during sensitivity adjustments
+                prof_stmt = select(Profile).where(Profile.user_id == current_user_id).with_for_update()
+                prof_res = await db.execute(prof_stmt)
+                profile = prof_res.scalar_one_or_none()
+                if profile is None:
+                    profile = await get_or_create_profile(db, current_user_id, commit=False)
+                new_sens, _ = adjust_sensitivity(profile.sensitivity_index, fb_val)
+                profile.sensitivity_index = new_sens
+                session.feedback = fb_val
+
+        await db.commit()
+        await db.refresh(session)
+        return session

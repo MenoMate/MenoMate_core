@@ -8,7 +8,7 @@ MenoMate is an integrated menstrual wellness platform designed to address dysmen
 
 - Flutter mobile application (`menomate-mobile`): Cross-platform client interfacing with end users and communicating locally with wearable hardware via Bluetooth Low Energy (BLE).
 - FastAPI backend (`menomate-core`): Central service responsible for authenticated business logic, cycle projection, daily logging, data aggregation, and safety-bound therapy policy calculation.
-- Supabase PostgreSQL: Managed relational database storing user profiles, cycle occurrences, daily symptom logs, device associations, therapy sessions, and conversation threads.
+- Supabase PostgreSQL: Managed relational database storing user profiles, cycle occurrences, daily symptom logs, device associations, and therapy sessions.
 - Supabase Auth: Secure user authentication issuing JSON Web Tokens (JWT) verified on every protected API endpoint.
 - Standalone ESP32 wearable: Planned hardware band with integrated heating elements, vibration actuators, and onboard thermal regulation.
 - BLE communication: Direct wireless link between the mobile handset and the wearable, keeping hardware control local and responsive.
@@ -220,7 +220,7 @@ menomate-core/
 │   ├── schemas/                     # Pydantic request and response contracts
 │   ├── services/                    # Cycle math, therapy policy, AI router
 │   └── main.py                      # FastAPI application entry point
-├── tests/                           # Pytest test suite (82 tests)
+├── tests/                           # Pytest test suite (85 tests)
 ├── supabase_initial_schema.sql      # Canonical DDL for database initialization
 ├── THIRD_PARTY_NOTICES.md           # Open-source attributions and licenses
 ├── requirements.txt                 # Minimum supported dependency versions
@@ -245,11 +245,11 @@ Patient safety is fundamental to the MenoMate platform:
   - Cycle tracking engine with start-to-start cycle length math, period duration limits, and explicit null reopening semantics
   - Weighted moving average prediction with fallback handling and null indicators on insufficient data
   - Relational daily wellness logging with validated symptoms taxonomy, full day upsert, and PATCH field clearing
-  - Deterministic therapy recommendation engine with 44.0 C safety ceiling, device ownership verification, and single feedback application
+  - Deterministic therapy recommendation engine with 44.0 C safety ceiling, device ownership verification, and single feedback application under concurrency
   - Wearable device association and therapy session tracking
   - Stateless AI care assistant with intent-tailored context and cautious phrasing
   - Canonical PostgreSQL schema DDL (`supabase_initial_schema.sql`)
-  - Comprehensive automated test suite (82 tests covering JWT auth requirements A–T, API contract regression, cycles, logs, therapy, onboarding, care, and emergency safety triage)
+  - Comprehensive automated test suite (85 tests covering JWT auth requirements A–T, complete API contract regression including DELETE device 401, atomic onboarding rollback & concurrency, cycles, logs, therapy, care, and emergency safety triage)
 
 - In Progress:
   - Integration with the Flutter mobile client (`menomate-mobile`)

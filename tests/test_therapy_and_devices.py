@@ -222,6 +222,69 @@ async def test_therapy_feedback_no_double_application_and_controlled_values(
 
 
 @pytest.mark.asyncio
+async def test_therapy_feedback_concurrent_requests_cannot_double_apply(
+    async_client: AsyncClient, auth_headers: dict
+):
+    """
+    Verifies that concurrent feedback requests against the same therapy session
+    cannot double-apply sensitivity adjustments under concurrency.
+    """
+    import asyncio
+
+    # 1. Reset profile sensitivity to 1.00
+    await async_client.patch("/api/v1/profile", headers=auth_headers, json={"sensitivity_index": 1.0})
+
+    # 2. Create a session with no feedback
+    s_res = await async_client.post(
+        "/api/v1/therapy/sessions",
+        headers=auth_headers,
+        json={"mode": "standard", "target_temperature_c": 39.0},
+    )
+    assert s_res.status_code == 201
+    s_id = s_res.json()["id"]
+
+    # 3. Fire 4 concurrent identical feedback PATCH requests
+    patch_coros = [
+        async_client.patch(
+            f"/api/v1/therapy/sessions/{s_id}",
+            headers=auth_headers,
+            json={"feedback": "insufficient_relief"},
+        )
+        for _ in range(4)
+    ]
+    responses = await asyncio.gather(*patch_coros)
+
+    # All should return 200 (first applies, remaining are idempotent no-ops)
+    for r in responses:
+        assert r.status_code == 200
+        assert r.json()["feedback"] == "insufficient_relief"
+
+    # Sensitivity index MUST be bumped exactly once: 1.0 -> 1.05 (never 1.10, 1.15, or 1.20)
+    prof = await async_client.get("/api/v1/profile", headers=auth_headers)
+    assert prof.status_code == 200
+    assert prof.json()["sensitivity_index"] == 1.05
+
+    # 4. Test concurrent conflicting feedback on a fresh session
+    s_res2 = await async_client.post(
+        "/api/v1/therapy/sessions",
+        headers=auth_headers,
+        json={"mode": "standard", "target_temperature_c": 38.0},
+    )
+    assert s_res2.status_code == 201
+    s_id2 = s_res2.json()["id"]
+
+    # One request sends insufficient_relief, another sends too_hot concurrently
+    conflicting_responses = await asyncio.gather(
+        async_client.patch(f"/api/v1/therapy/sessions/{s_id2}", headers=auth_headers, json={"feedback": "insufficient_relief"}),
+        async_client.patch(f"/api/v1/therapy/sessions/{s_id2}", headers=auth_headers, json={"feedback": "too_hot"}),
+        return_exceptions=True,
+    )
+    status_codes = [r.status_code for r in conflicting_responses if hasattr(r, "status_code")]
+    assert 200 in status_codes
+    assert 409 in status_codes
+
+
+@pytest.mark.asyncio
 async def test_therapy_session_date_validation(async_client: AsyncClient, auth_headers: dict):
     from datetime import datetime, timezone, timedelta
     now = datetime.now(timezone.utc)
