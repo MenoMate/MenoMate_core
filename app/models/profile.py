@@ -12,7 +12,6 @@ if TYPE_CHECKING:
     from app.models.daily_log import DailyLog
     from app.models.device import Device
     from app.models.therapy_session import TherapySession
-    from app.models.chat import ChatConversation
 
 
 class Profile(Base):
@@ -22,7 +21,6 @@ class Profile(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid4,
     )
     name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     usual_cycle_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
@@ -54,7 +52,4 @@ class Profile(Base):
     )
     therapy_sessions: Mapped[List["TherapySession"]] = relationship(
         "TherapySession", back_populates="user", cascade="all, delete-orphan"
-    )
-    conversations: Mapped[List["ChatConversation"]] = relationship(
-        "ChatConversation", back_populates="user", cascade="all, delete-orphan"
     )

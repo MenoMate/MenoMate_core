@@ -10,6 +10,7 @@ from app.models.cycle import Cycle
 from app.models.profile import Profile
 from app.schemas.onboarding import OnboardingRequest, OnboardingResponse
 from app.schemas.profile import ProfileResponse
+from app.services.profile import get_or_create_profile
 
 router = APIRouter(prefix="/onboarding", tags=["Onboarding"])
 
@@ -26,23 +27,11 @@ async def complete_onboarding(
     db: AsyncSession = Depends(get_db),
 ) -> OnboardingResponse:
     # 1. Fetch or create profile
-    prof_stmt = select(Profile).where(Profile.user_id == current_user_id)
-    prof_res = await db.execute(prof_stmt)
-    profile = prof_res.scalar_one_or_none()
-
-    if profile is None:
-        profile = Profile(
-            user_id=current_user_id,
-            name=payload.name,
-            usual_cycle_days=payload.usual_cycle_days,
-            usual_period_days=payload.usual_period_days,
-        )
-        db.add(profile)
-    else:
-        if payload.name is not None:
-            profile.name = payload.name
-        profile.usual_cycle_days = payload.usual_cycle_days
-        profile.usual_period_days = payload.usual_period_days
+    profile = await get_or_create_profile(db, current_user_id)
+    if payload.name is not None:
+        profile.name = payload.name
+    profile.usual_cycle_days = payload.usual_cycle_days
+    profile.usual_period_days = payload.usual_period_days
 
     # 2. Check if cycle starting on this date already exists to preserve idempotency
     cycle_stmt = select(Cycle).where(

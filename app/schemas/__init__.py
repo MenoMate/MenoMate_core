@@ -22,7 +22,6 @@ from app.schemas.therapy import (
     TherapySessionResponse,
 )
 from app.schemas.care import CareInteractionRequest, CareInteractionResponse
-from app.schemas.chat import ChatMessageResponse, ChatConversationResponse
 
 __all__ = [
     "ProfileBase",
@@ -55,6 +54,4 @@ __all__ = [
     "TherapySessionResponse",
     "CareInteractionRequest",
     "CareInteractionResponse",
-    "ChatMessageResponse",
-    "ChatConversationResponse",
 ]

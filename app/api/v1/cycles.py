@@ -17,6 +17,7 @@ from app.schemas.cycle import (
     CycleUpdate,
 )
 from app.services.cycle_calculator import calculate_period_length
+from app.services.profile import get_or_create_profile
 from app.services.summary import get_current_cycle_summary
 
 router = APIRouter(prefix="/cycles", tags=["Cycles"])
@@ -122,11 +123,7 @@ async def create_cycle(
     db: AsyncSession = Depends(get_db),
 ) -> CycleResponse:
     # Ensure profile exists
-    prof_stmt = select(Profile).where(Profile.user_id == current_user_id)
-    prof_res = await db.execute(prof_stmt)
-    if not prof_res.scalar_one_or_none():
-        db.add(Profile(user_id=current_user_id))
-        await db.flush()
+    await get_or_create_profile(db, current_user_id)
 
     # Overlapping period check
     await check_cycle_overlap(

@@ -20,16 +20,13 @@ from app.schemas.daily_log import (
     SymptomItem,
     SymptomMeta,
 )
+from app.services.profile import get_or_create_profile
 
 router = APIRouter(tags=["Daily Logs & Symptoms"])
 
 
 async def _ensure_profile_exists(db: AsyncSession, user_id: uuid.UUID) -> None:
-    stmt = select(Profile).where(Profile.user_id == user_id)
-    res = await db.execute(stmt)
-    if not res.scalar_one_or_none():
-        db.add(Profile(user_id=user_id))
-        await db.flush()
+    await get_or_create_profile(db, user_id)
 
 
 @router.get(

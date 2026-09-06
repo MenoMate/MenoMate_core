@@ -83,7 +83,6 @@ The database is structured in PostgreSQL with foreign keys cascading from `profi
 - `symptom_logs`: Child records attached to `daily_logs` identifying specific symptoms and severity scores (0 to 10).
 - `devices`: BLE wearable hardware identifiers, paired firmware version, and connection timestamps.
 - `therapy_sessions`: Log of completed therapy sessions recording mode, applied temperature, vibration parameters, pre/post pain scores, and relief feedback.
-- `chat_conversations` and `chat_messages`: Reserved database tables for planned multi-turn conversation persistence. Care assistance currently operates statelessly via `POST /api/v1/care/interactions`.
 
 ## API Endpoints
 
@@ -165,8 +164,7 @@ All endpoints except `/health` and OpenAPI documentation require a valid Supabas
    Update `.env` with your Supabase project credentials.
 
 5. Database setup:
-   - For fresh Supabase setups: Run `supabase_initial_schema.sql` in the Supabase SQL Editor.
-   - For existing databases migrating from previous schema versions: Run `supabase_migration.sql` in the Supabase SQL Editor.
+   - Execute `supabase_initial_schema.sql` in the Supabase SQL Editor to initialize all tables, constraints, and indexes.
 
 6. Run the automated test suite:
    ```bash
@@ -222,10 +220,8 @@ menomate-core/
 │   ├── schemas/                     # Pydantic request and response contracts
 │   ├── services/                    # Cycle math, therapy policy, AI router
 │   └── main.py                      # FastAPI application entry point
-├── tests/                           # Pytest test suite
-├── supabase_initial_schema.sql      # Canonical DDL for fresh databases
-├── live_schema_migration.sql        # Non-destructive idempotent migration for live DB
-├── supabase_migration.sql           # Non-destructive migration script
+├── tests/                           # Pytest test suite (82 tests)
+├── supabase_initial_schema.sql      # Canonical DDL for database initialization
 ├── THIRD_PARTY_NOTICES.md           # Open-source attributions and licenses
 ├── requirements.txt                 # Minimum supported dependency versions
 ├── pytest.ini                       # Test runner configuration
@@ -251,8 +247,8 @@ Patient safety is fundamental to the MenoMate platform:
   - Relational daily wellness logging with validated symptoms taxonomy, full day upsert, and PATCH field clearing
   - Deterministic therapy recommendation engine with 44.0 C safety ceiling, device ownership verification, and single feedback application
   - Wearable device association and therapy session tracking
-  - Stateless AI care assistant with intent-tailored context and cautious phrasing (ChatConversation/ChatMessage tables reserved for future multi-turn persistence)
-  - Clean separation between fresh schema DDL and live idempotent migration scripts
+  - Stateless AI care assistant with intent-tailored context and cautious phrasing
+  - Canonical PostgreSQL schema DDL (`supabase_initial_schema.sql`)
   - Comprehensive automated test suite (82 tests covering JWT auth requirements A–T, API contract regression, cycles, logs, therapy, onboarding, care, and emergency safety triage)
 
 - In Progress:
