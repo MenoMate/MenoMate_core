@@ -9,13 +9,16 @@ class CareIntentEnum(str, Enum):
     pain_help = "pain_help"
     wellness_help = "wellness_help"
     device_help = "device_help"
+    pattern_summary = "pattern_summary"
+    therapy_recommendation = "therapy_recommendation"
+    feature_help = "feature_help"
     other = "other"
 
 
 class CareInteractionRequest(BaseModel):
     intent: CareIntentEnum = Field(
         default=CareIntentEnum.wellness_help,
-        description="Canonical intent type: cycle_insight, symptom_insight, pain_help, wellness_help, device_help, or other",
+        description="Canonical intent type: cycle_insight, symptom_insight, pain_help, wellness_help, device_help, pattern_summary, therapy_recommendation, feature_help, or other",
     )
     user_message: Optional[str] = Field(
         default=None,
@@ -30,3 +33,4 @@ class CareInteractionResponse(BaseModel):
     is_ai_generated: bool
     suggested_actions: List[str] = []
     disclaimer: str
+    therapy_profile: Optional[str] = None

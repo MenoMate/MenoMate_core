@@ -18,15 +18,25 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 os.environ["SUPABASE_JWT_SECRET"] = "test-secret-key-12345678901234567890"
 os.environ["SUPABASE_URL"] = "https://test-project.supabase.co"
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
+os.environ["GROQ_API_KEY"] = ""
 
 from app.core.config import settings
 settings.SUPABASE_JWT_SECRET = "test-secret-key-12345678901234567890"
 settings.SUPABASE_URL = "https://test-project.supabase.co"
+settings.GROQ_API_KEY = None
 
 import app.models  # Ensure all models are registered with Base.metadata
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
+from app.services.ai_provider import set_ai_provider
+
+
+@pytest.fixture(autouse=True)
+def reset_ai_provider_override():
+    set_ai_provider(None)
+    yield
+    set_ai_provider(None)
 
 TEST_USER_ID = uuid.UUID("11111111-2222-3333-4444-555555555555")
 ANOTHER_USER_ID = uuid.UUID("99999999-8888-7777-6666-555555555555")

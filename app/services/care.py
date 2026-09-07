@@ -140,21 +140,27 @@ async def handle_care_interaction(
     provider = get_ai_provider()
     prompt_text = user_message or f"Intent: {intent_str}"
 
-    ai_reply = await provider.generate_reply(
+    care_res = await provider.generate_care_response(
         context=context,
         user_message=prompt_text,
         intent=intent_str,
     )
+    ai_reply = care_res.get("response_text", "")
+    therapy_profile = care_res.get("therapy_profile")
+    is_ai = care_res.get("is_ai_generated", False)
 
     suggested = []
-    if "cramp" in prompt_text.lower() or intent_str in ("pain_help", "therapy"):
+    if therapy_profile:
+        suggested.append(f"Start {therapy_profile.capitalize()} Thermal Therapy")
+    elif "cramp" in prompt_text.lower() or intent_str in ("pain_help", "therapy", "therapy_recommendation"):
         suggested.append("Start Thermal Therapy")
     suggested.append("Log Daily Symptoms")
 
     return {
         "intent": intent_str,
         "response_text": ai_reply,
-        "is_ai_generated": getattr(provider, "is_real_ai", False),
+        "is_ai_generated": is_ai,
         "suggested_actions": suggested,
         "disclaimer": MEDICAL_DISCLAIMER,
+        "therapy_profile": therapy_profile,
     }

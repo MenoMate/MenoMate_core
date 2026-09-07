@@ -30,42 +30,107 @@ async def build_care_context(
     summary = await get_current_cycle_summary(db, user_id)
     today = date.today()
 
-    # --- Therapy Intent Context ---
-    if intent in ("therapy", "pain_help"):
+    # --- Therapy / Pain Personalization Intent Context ---
+    if intent in ("therapy", "pain_help", "therapy_recommendation"):
         # Fetch user sensitivity
         prof_stmt = select(Profile).where(Profile.user_id == user_id)
         prof_res = await db.execute(prof_stmt)
         prof = prof_res.scalar_one_or_none()
         sensitivity = prof.sensitivity_index if prof else 1.0
 
-        # Fetch recent 3 therapy sessions
+        # Query up to 10 recent therapy sessions for verified behavioral patterns
         therapy_stmt = (
             select(TherapySession)
             .where(TherapySession.user_id == user_id)
             .order_by(desc(TherapySession.started_at))
-            .limit(3)
+            .limit(10)
         )
         therapy_res = await db.execute(therapy_stmt)
-        sessions = therapy_res.scalars().all()
+        sessions = list(therapy_res.scalars().all())
+
+        # Check today's pain
+        today_log_stmt = select(DailyLog).where(DailyLog.user_id == user_id, DailyLog.log_date == today)
+        today_log_res = await db.execute(today_log_stmt)
+        today_log = today_log_res.scalar_one_or_none()
+        current_pain = today_log.pain if today_log else summary.get("recent_pain_avg")
+
+        has_history = len(sessions) > 0
+        recent_feedback = [s.feedback for s in sessions if s.feedback][:5]
+
+        # Analyze verified behavioral patterns per pain category (mild: 1-4, moderate: 5-7, severe: 8-10)
+        pattern_data: Dict[str, Dict[str, Any]] = {
+            "mild_pain": {"sessions": 0, "successful_sessions": 0, "preferred_profile": None, "profiles": {}},
+            "moderate_pain": {"sessions": 0, "successful_sessions": 0, "preferred_profile": None, "profiles": {}},
+            "severe_pain": {"sessions": 0, "successful_sessions": 0, "preferred_profile": None, "profiles": {}},
+        }
+
+        def _resolve_profile_label(session: TherapySession) -> str:
+            mode_lower = (session.mode or "").lower()
+            if "gentle" in mode_lower:
+                return "GENTLE"
+            if "strong" in mode_lower or "intense" in mode_lower:
+                return "STRONG"
+            if "mod" in mode_lower:
+                return "MODERATE"
+            if session.target_temperature_c is not None:
+                if session.target_temperature_c <= 38.0:
+                    return "GENTLE"
+                elif session.target_temperature_c <= 41.0:
+                    return "MODERATE"
+                else:
+                    return "STRONG"
+            return "MODERATE"
+
+        for s in sessions:
+            p = s.pain_before
+            if p is None:
+                continue
+            cat = "mild_pain" if p <= 4 else ("moderate_pain" if p <= 7 else "severe_pain")
+            prof_label = _resolve_profile_label(s)
+            pattern_data[cat]["sessions"] += 1
+            pattern_data[cat]["profiles"][prof_label] = pattern_data[cat]["profiles"].get(prof_label, 0) + 1
+            is_successful = (s.feedback == "just_right") or (s.pain_after is not None and s.pain_after < p)
+            if is_successful:
+                pattern_data[cat]["successful_sessions"] += 1
+
+        recent_pattern = {}
+        for cat, val in pattern_data.items():
+            if val["sessions"] > 0:
+                best_profile = max(val["profiles"], key=val["profiles"].get) if val["profiles"] else None
+                recent_pattern[cat] = {
+                    "preferred_profile": best_profile,
+                    "successful_sessions": val["successful_sessions"],
+                    "total_sessions": val["sessions"],
+                }
 
         recent_sessions = [
             {
                 "mode": s.mode,
+                "profile": _resolve_profile_label(s),
                 "target_temp_c": s.target_temperature_c,
                 "vibration_intensity": s.vibration_intensity,
                 "pain_before": s.pain_before,
                 "pain_after": s.pain_after,
                 "feedback": s.feedback,
             }
-            for s in sessions
+            for s in sessions[:3]
         ]
 
         return {
             "intent": intent,
             "cycle_day": summary.get("current_cycle_day"),
             "phase": summary.get("phase"),
+            "current_pain": current_pain,
             "recent_pain_avg": summary.get("recent_pain_avg"),
             "sensitivity_index": sensitivity,
+            "has_history": has_history,
+            "history_note": (
+                "Verified user therapy history is available."
+                if has_history
+                else "No prior therapy sessions recorded. State that there is insufficient history to personalize recommendations."
+            ),
+            "recent_pattern": recent_pattern,
+            "recent_feedback": recent_feedback,
             "recent_therapy_sessions": recent_sessions,
         }
 

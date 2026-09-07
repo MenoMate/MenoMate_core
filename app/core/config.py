@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: Union[List[str], str] = "*"
     AUTO_CREATE_TABLES: bool = False
 
+    # Groq AI Provider Configuration (Backend-Only)
+    GROQ_API_KEY: Optional[str] = None
+    GROQ_MODEL: str = "openai/gpt-oss-120b"
+
     @property
     def jwks_url(self) -> str:
         if self.SUPABASE_JWKS_URL and self.SUPABASE_JWKS_URL.strip():
