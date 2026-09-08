@@ -86,8 +86,8 @@ The database is structured in PostgreSQL with foreign keys cascading from `profi
 
 ## API Endpoints
 
-The API defines **26 total operations across 20 unique URL paths**:
-- **24 Production API v1 Operations** across 18 unique `/api/v1/...` paths (23 authenticated user-scoped operations and 1 public symptom taxonomy).
+The API defines **27 total operations across 20 unique URL paths**:
+- **25 Production API v1 Operations** across 18 unique `/api/v1/...` paths (24 authenticated user-scoped operations and 1 public symptom taxonomy).
 - **2 Root / Health Operations** (`GET /` and `GET /health`).
 
 All endpoints except `/health`, `/`, and `GET /api/v1/symptoms` require a valid Supabase JWT Bearer token in the `Authorization` header.
@@ -103,6 +103,7 @@ All endpoints except `/health`, `/`, and `GET /api/v1/symptoms` require a valid 
 
 ### Cycles
 - `GET /api/v1/cycles/current`: Retrieve active cycle status, phase, bleeding flag, and next period prediction.
+- `POST /api/v1/cycles/current/end`: End the active ongoing menstrual period for the current user (sets `period_end` to specified date or today).
 - `GET /api/v1/cycles`: List all logged menstrual bleeding occurrences for the user.
 - `POST /api/v1/cycles`: Log a new period occurrence with overlap, duration, and future-date validation.
 - `PATCH /api/v1/cycles/{cycle_id}`: Update or close an ongoing period occurrence (explicitly pass `period_end=null` to reopen).
@@ -185,6 +186,12 @@ All endpoints except `/health`, `/`, and `GET /api/v1/symptoms` require a valid 
    - ReDoc: `http://localhost:8000/redoc`
    - Health check: `http://localhost:8000/health`
 
+9. Mobile client connection over USB (optional):
+   ```bash
+   # Route mobile requests to local development backend
+   adb reverse tcp:8000 tcp:8000
+   ```
+
 ## Environment Variables
 
 | Variable | Required | Description | Scope |
@@ -195,6 +202,8 @@ All endpoints except `/health`, `/`, and `GET /api/v1/symptoms` require a valid 
 | `SUPABASE_URL` | Yes | Base URL of the Supabase project (used for issuer and JWKS discovery) | Server-side only |
 | `ALLOWED_ORIGINS` | No | Allowed CORS origins (comma-separated list or `*`, default `*`) | Server-side only |
 | `AUTO_CREATE_TABLES` | No | Automatically run DDL on startup (default `false`) | Server-side only |
+| `GROQ_API_KEY` | Optional | Groq Cloud API key for AI Care Assistant LLM inference. Falls back to mock provider if unset. | Server-side only |
+| `GROQ_MODEL` | No | Groq LLM model name (default `openai/gpt-oss-120b` or configured model) | Server-side only |
 
 Never expose `DATABASE_URL` or `SUPABASE_JWT_SECRET` to client applications.
 

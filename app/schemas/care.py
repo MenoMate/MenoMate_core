@@ -12,6 +12,7 @@ class CareIntentEnum(str, Enum):
     pattern_summary = "pattern_summary"
     therapy_recommendation = "therapy_recommendation"
     feature_help = "feature_help"
+    general_inquiry = "general_inquiry"
     other = "other"
 
 

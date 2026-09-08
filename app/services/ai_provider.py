@@ -41,6 +41,9 @@ GROQ_CARE_SYSTEM_PROMPT = (
     "- personalize recommendations using verified user history\n"
     "- recommend one of the backend-defined therapy profiles when appropriate\n"
     "- explain MenoMate features\n\n"
+    "Voice and Tone:\n"
+    "Use warm, supportive, person-centered language addressed directly to the user (e.g. \"I'd suggest...\", \"Based on what you've shared...\", \"Based on your cycle...\"). "
+    "Do NOT use generic population phrases like \"many users start with...\" or \"many people find...\".\n\n"
     "You are not a general-purpose assistant. For unrelated requests (such as general programming, sports, "
     "politics, general trivia, homework), set intent to 'out_of_scope', set therapy_profile to null, "
     "and politely state: \"I'm here to help with your menstrual wellness, cycle data, symptoms, and MenoMate features. I can't help with unrelated topics.\"\n\n"
@@ -134,14 +137,14 @@ class MockAIProvider(BaseAIProvider):
         if "cramp" in msg_lower or "pain" in msg_lower or intent in ("pain_help", "therapy_recommendation"):
             return (
                 f"Around day {cycle_day} ({phase} phase), cramping can feel uncomfortable. "
-                "Some people find that gentle warmth (like a warm compress or our wearable's safe thermal setting), "
-                "light movement, or resting in a comfortable position can offer comfort. "
+                "I'd suggest gentle warmth (like a warm compress or our wearable's safe thermal setting), "
+                "light movement, or resting in a comfortable position for soothing relief. "
                 "If pain feels unusually sharp or severe, please consider speaking with a healthcare professional."
             )
         elif "tired" in msg_lower or "fatigue" in msg_lower:
             return (
-                f"Feeling low energy around day {cycle_day} ({phase} phase) is something many people experience. "
-                "Light stretching, staying well-hydrated, and taking extra time for rest may help you feel more restored. "
+                f"Based on your cycle around day {cycle_day} ({phase} phase), feeling low energy can happen. "
+                "I'd suggest light stretching, staying well-hydrated, and taking extra time for rest to help you feel restored. "
                 "If fatigue feels persistent or overwhelming, consider speaking with a healthcare provider."
             )
         elif "nausea" in msg_lower:

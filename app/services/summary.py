@@ -55,6 +55,8 @@ async def get_current_cycle_summary(
             "current_cycle_day": None,
             "phase": "unknown",
             "is_bleeding": False,
+            "is_ongoing": False,
+            "active_cycle_id": None,
             "latest_period_start": None,
             "latest_period_end": None,
             "predicted_cycle_length": None,
@@ -80,13 +82,31 @@ async def get_current_cycle_summary(
     else:
         avg_period_len = usual_period or 5
 
-    if started_periods:
+    # Check for active ongoing cycle (period_end is None and started <= today)
+    ongoing_period = next((p for p in reversed(all_periods) if p.period_end is None and p.period_start <= today), None)
+    is_ongoing = ongoing_period is not None
+    active_cycle_id = ongoing_period.id if ongoing_period else None
+
+    if ongoing_period:
+        active_period = ongoing_period
+        is_bleeding = True
+        current_cycle_day = (today - active_period.period_start).days + 1
+        latest_period_start = active_period.period_start
+        latest_period_end = None
+    elif started_periods:
         active_period = started_periods[-1]
-        is_bleeding = (active_period.period_end is None) or (today <= active_period.period_end)
+        is_bleeding = False  # Completed/ended period
         current_cycle_day = (today - active_period.period_start).days + 1
         latest_period_start = active_period.period_start
         latest_period_end = active_period.period_end
+    else:
+        active_period = None
+        is_bleeding = False
+        current_cycle_day = None
+        latest_period_start = None
+        latest_period_end = None
 
+    if active_period:
         if future_periods:
             predicted_next_period = future_periods[0].period_start
             days_until_next_period = (predicted_next_period - today).days
@@ -155,6 +175,8 @@ async def get_current_cycle_summary(
         "current_cycle_day": current_cycle_day,
         "phase": phase,
         "is_bleeding": is_bleeding,
+        "is_ongoing": is_ongoing,
+        "active_cycle_id": active_cycle_id,
         "latest_period_start": latest_period_start,
         "latest_period_end": latest_period_end,
         "predicted_cycle_length": predicted_length,

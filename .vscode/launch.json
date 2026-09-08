@@ -1,0 +1,47 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Flutter Mobile (Web Server)",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "mobile",
+      "args": [
+        "-d",
+        "web-server",
+        "--web-port",
+        "8080"
+      ]
+    },
+    {
+      "name": "Flutter Mobile (Chrome)",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "mobile",
+      "args": [
+        "-d",
+        "chrome"
+      ]
+    },
+    {
+      "name": "Flutter Mobile (Edge)",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "mobile",
+      "args": [
+        "-d",
+        "edge"
+      ]
+    },
+    {
+      "name": "Flutter Mobile (Windows Desktop)",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "mobile",
+      "args": [
+        "-d",
+        "windows"
+      ]
+    }
+  ]
+}

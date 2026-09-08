@@ -80,6 +80,8 @@ async def get_current_cycle(
         current_cycle_day=summary["current_cycle_day"],
         phase=summary["phase"],
         is_bleeding=summary["is_bleeding"],
+        is_ongoing=summary.get("is_ongoing", False),
+        active_cycle_id=summary.get("active_cycle_id"),
         latest_period_start=summary.get("latest_period_start"),
         latest_period_end=summary.get("latest_period_end"),
         predicted_cycle_length=summary.get("predicted_cycle_length"),
@@ -90,6 +92,74 @@ async def get_current_cycle(
         average_cycle_length=summary["average_cycle_length"],
         average_period_length=summary["average_period_length"],
     )
+
+
+@router.post(
+    "/current/end",
+    response_model=CycleResponse,
+    summary="End the active ongoing menstrual period for the current user",
+)
+async def end_current_cycle(
+    payload: Optional[CycleUpdate] = None,
+    current_user_id: uuid.UUID = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CycleResponse:
+    today = date.today()
+    end_date = payload.period_end if (payload and payload.period_end) else today
+
+    # 1. Look for ongoing period with period_end IS NULL
+    stmt = (
+        select(Cycle)
+        .where(Cycle.user_id == current_user_id, Cycle.period_end.is_(None))
+        .order_by(desc(Cycle.period_start))
+    )
+    res = await db.execute(stmt)
+    cycle = res.scalar_one_or_none()
+
+    # 2. If none with null period_end, look for active period where period_end >= today
+    if not cycle:
+        stmt2 = (
+            select(Cycle)
+            .where(
+                Cycle.user_id == current_user_id,
+                Cycle.period_start <= today,
+                Cycle.period_end >= today,
+            )
+            .order_by(desc(Cycle.period_start))
+        )
+        res2 = await db.execute(stmt2)
+        cycle = res2.scalar_one_or_none()
+
+    if not cycle:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active ongoing period found to end.",
+        )
+
+    if end_date < cycle.period_start:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="period_end cannot be prior to period_start",
+        )
+
+    if (end_date - cycle.period_start).days > 30:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="period duration cannot exceed 30 days",
+        )
+
+    await check_cycle_overlap(
+        db=db,
+        user_id=current_user_id,
+        period_start=cycle.period_start,
+        period_end=end_date,
+        exclude_cycle_id=cycle.id,
+    )
+
+    cycle.period_end = end_date
+    await db.commit()
+    await db.refresh(cycle)
+    return _to_cycle_response(cycle)
 
 
 @router.get(
@@ -124,6 +194,46 @@ async def create_cycle(
 ) -> CycleResponse:
     # Ensure profile exists
     await get_or_create_profile(db, current_user_id)
+
+    # Check if user already has an active ongoing period with period_end IS NULL
+    stmt_ongoing = select(Cycle).where(
+        Cycle.user_id == current_user_id,
+        Cycle.period_end.is_(None),
+    )
+    res_ongoing = await db.execute(stmt_ongoing)
+    ongoing_cycle = res_ongoing.scalar_one_or_none()
+    if ongoing_cycle:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"An active period starting on {ongoing_cycle.period_start} is already in progress. Please mark it as ended before logging a new period.",
+        )
+
+    # If a period already exists with this exact start date, reopen or update it
+    stmt_same = select(Cycle).where(
+        Cycle.user_id == current_user_id,
+        Cycle.period_start == payload.period_start,
+    )
+    res_same = await db.execute(stmt_same)
+    existing_same = res_same.scalar_one_or_none()
+    if existing_same:
+        existing_same.period_end = payload.period_end
+        await db.commit()
+        await db.refresh(existing_same)
+        return _to_cycle_response(existing_same)
+
+    # If previous period ended on this same start date (e.g. earlier today),
+    # adjust previous cycle's end date to yesterday to prevent boundary day collision
+    from datetime import timedelta
+    stmt_prev = select(Cycle).where(
+        Cycle.user_id == current_user_id,
+        Cycle.period_start < payload.period_start,
+        Cycle.period_end == payload.period_start,
+    )
+    res_prev = await db.execute(stmt_prev)
+    prev_cycle = res_prev.scalar_one_or_none()
+    if prev_cycle:
+        prev_cycle.period_end = payload.period_start - timedelta(days=1)
+        await db.flush()
 
     # Overlapping period check
     await check_cycle_overlap(

@@ -189,3 +189,46 @@ async def test_cycle_duplicate_period_start_rejected_with_409(async_client: Asyn
         json={"period_start": str(p_date), "period_end": str(p_date + timedelta(days=5))},
     )
     assert r2.status_code in (409, 400)  # DB unique constraint or overlap check rejected with conflict
+
+
+@pytest.mark.asyncio
+async def test_end_current_cycle_endpoint(async_client: AsyncClient, other_user_auth_headers: dict):
+    # 1. Initially no ongoing period -> 404
+    r_fail = await async_client.post(
+        "/api/v1/cycles/current/end",
+        headers=other_user_auth_headers,
+        json={},
+    )
+    assert r_fail.status_code == 404
+    assert "No active ongoing period found" in r_fail.json()["detail"]
+
+    # 2. Start ongoing period (start 3 days ago, period_end is None)
+    start_date = date.today() - timedelta(days=3)
+    r_start = await async_client.post(
+        "/api/v1/cycles",
+        headers=other_user_auth_headers,
+        json={"period_start": str(start_date), "period_end": None},
+    )
+    assert r_start.status_code == 201
+
+    # 3. Verify current cycle shows ongoing
+    r_cur = await async_client.get("/api/v1/cycles/current", headers=other_user_auth_headers)
+    assert r_cur.status_code == 200
+    assert r_cur.json()["latest_period_end"] is None
+
+    # 4. Call /current/end
+    r_end = await async_client.post(
+        "/api/v1/cycles/current/end",
+        headers=other_user_auth_headers,
+        json={"period_end": str(date.today())},
+    )
+    assert r_end.status_code == 200
+    end_data = r_end.json()
+    assert end_data["period_end"] == str(date.today())
+    assert end_data["period_length_days"] == 4
+
+    # 5. Verify current cycle now has latest_period_end set
+    r_cur2 = await async_client.get("/api/v1/cycles/current", headers=other_user_auth_headers)
+    assert r_cur2.status_code == 200
+    assert r_cur2.json()["latest_period_end"] == str(date.today())
+

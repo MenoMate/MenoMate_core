@@ -62,6 +62,8 @@ class CurrentCycleResponse(BaseModel):
     current_cycle_day: Optional[int] = None
     phase: str
     is_bleeding: bool
+    is_ongoing: bool = False
+    active_cycle_id: Optional[int] = None
     latest_period_start: Optional[date] = None
     latest_period_end: Optional[date] = None
     predicted_cycle_length: Optional[int] = None
