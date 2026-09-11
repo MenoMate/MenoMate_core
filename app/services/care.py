@@ -81,18 +81,35 @@ async def handle_care_interaction(
         next_p = summary["predicted_next_period"]
         days_left = summary["days_until_next_period"]
         conf = summary["prediction_confidence"]
+        pred_status = summary.get("prediction_status")
 
         if next_p:
-            if days_left is not None and days_left < 0:
-                timeline_str = f"({abs(days_left)} days overdue, predicted: {next_p}, confidence: {conf})"
+            if pred_status == "awaiting_next_start":
+                # Rule F: neutral phrasing, no negative countdown.
+                timeline_str = f"(expected around {next_p}, confidence: {conf})"
+                reply = (
+                    f"You are currently on Day {cycle_day} of your cycle, in the {phase.capitalize()} phase. "
+                    f"Your next estimated period was expected around {next_p} {timeline_str}. "
+                    "Log your next period when it starts."
+                )
+            elif days_left is None:
+                timeline_str = f"(predicted: {next_p}, confidence: {conf})"
+                reply = (
+                    f"You are currently on Day {cycle_day} of your cycle, in the {phase.capitalize()} phase. "
+                    f"Your next estimated period is around {next_p} {timeline_str}."
+                )
             elif days_left == 0:
                 timeline_str = f"(predicted for today, confidence: {conf})"
+                reply = (
+                    f"You are currently on Day {cycle_day} of your cycle, in the {phase.capitalize()} phase. "
+                    f"Your next estimated period is around {next_p} {timeline_str}."
+                )
             else:
                 timeline_str = f"(in approximately {days_left} days, confidence: {conf})"
-            reply = (
-                f"You are currently on Day {cycle_day} of your cycle, in the {phase.capitalize()} phase. "
-                f"Your next estimated period is around {next_p} {timeline_str}."
-            )
+                reply = (
+                    f"You are currently on Day {cycle_day} of your cycle, in the {phase.capitalize()} phase. "
+                    f"Your next estimated period is around {next_p} {timeline_str}."
+                )
         else:
             reply = (
                 f"You are currently on Day {cycle_day} of your cycle, in the {phase.capitalize()} phase. "

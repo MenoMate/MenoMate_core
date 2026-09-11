@@ -87,6 +87,7 @@ async def get_current_cycle(
         predicted_cycle_length=summary.get("predicted_cycle_length"),
         predicted_next_period=summary["predicted_next_period"],
         days_until_next_period=summary["days_until_next_period"],
+        prediction_status=summary.get("prediction_status"),
         prediction_confidence=summary["prediction_confidence"],
         prediction_source=summary.get("prediction_source"),
         average_cycle_length=summary["average_cycle_length"],

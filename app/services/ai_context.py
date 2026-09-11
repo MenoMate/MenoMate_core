@@ -139,7 +139,7 @@ async def build_care_context(
         cycles_stmt = select(Cycle).where(Cycle.user_id == user_id).order_by(Cycle.period_start.asc())
         cycles_res = await db.execute(cycles_stmt)
         all_periods = list(cycles_res.scalars().all())
-        completed_lengths = calculate_cycle_lengths(all_periods)
+        completed_lengths = calculate_cycle_lengths(all_periods, today=today)
 
         return {
             "intent": intent,

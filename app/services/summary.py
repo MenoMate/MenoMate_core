@@ -39,7 +39,8 @@ async def get_current_cycle_summary(
     all_periods: List[Cycle] = list(cycles_res.scalars().all())
 
     # 3. Calculate completed cycle lengths & prediction
-    cycle_lengths = calculate_cycle_lengths(all_periods)
+    # Rule B: only observed periods (period_start <= today) train prediction.
+    cycle_lengths = calculate_cycle_lengths(all_periods, today=today)
     prediction = predict_next_cycle(
         completed_cycle_lengths=cycle_lengths,
         usual_cycle_days=usual_cycle,
@@ -62,6 +63,7 @@ async def get_current_cycle_summary(
             "predicted_cycle_length": None,
             "predicted_next_period": None,
             "days_until_next_period": None,
+            "prediction_status": None,
             "prediction_confidence": "insufficient_data",
             "prediction_source": "insufficient_data",
             "average_cycle_length": usual_cycle,
@@ -112,12 +114,26 @@ async def get_current_cycle_summary(
             days_until_next_period = (predicted_next_period - today).days
             confidence = "high"
             source = "user_logged"
+            # Future user-logged date is display-only; it is upcoming by definition.
+            prediction_status = "upcoming" if days_until_next_period != 0 else "today"
         elif predicted_length is not None:
             predicted_next_period = active_period.period_start + timedelta(days=predicted_length)
-            days_until_next_period = (predicted_next_period - today).days
+            raw_days = (predicted_next_period - today).days
+            # Rule F: never expose negative countdown.
+            # Clamp to 0 and use neutral awaiting_next_start status.
+            if raw_days > 0:
+                days_until_next_period = raw_days
+                prediction_status = "upcoming"
+            elif raw_days == 0:
+                days_until_next_period = 0
+                prediction_status = "today"
+            else:
+                days_until_next_period = 0
+                prediction_status = "awaiting_next_start"
         else:
             predicted_next_period = None
             days_until_next_period = None
+            prediction_status = None
 
         phase = estimate_phase(
             cycle_day=current_cycle_day,
@@ -135,6 +151,7 @@ async def get_current_cycle_summary(
         latest_period_end = first_future.period_end
         predicted_next_period = first_future.period_start
         days_until_next_period = (predicted_next_period - today).days
+        prediction_status = "upcoming" if days_until_next_period != 0 else "today"
         confidence = "high"
         source = "user_logged"
 
@@ -182,6 +199,7 @@ async def get_current_cycle_summary(
         "predicted_cycle_length": predicted_length,
         "predicted_next_period": predicted_next_period,
         "days_until_next_period": days_until_next_period,
+        "prediction_status": prediction_status,
         "prediction_confidence": confidence,
         "prediction_source": source,
         "average_cycle_length": avg_cycle_len,
@@ -195,15 +213,20 @@ async def get_current_cycle_summary(
 async def get_history_summary(
     db: AsyncSession,
     user_id: uuid.UUID,
+    today: Optional[date] = None,
 ) -> Dict[str, Any]:
+    if today is None:
+        today = date.today()
     # Fetch all periods sorted ascending
     stmt = select(Cycle).where(Cycle.user_id == user_id).order_by(Cycle.period_start.asc())
     res = await db.execute(stmt)
     periods: List[Cycle] = list(res.scalars().all())
 
     # Build historical period list with cycle length and period length
+    # Display includes all logged periods (including future display-only),
+    # but prediction training / averages use observed periods only (Rule B).
     history_entries = []
-    cycle_lengths = calculate_cycle_lengths(periods)
+    cycle_lengths = calculate_cycle_lengths(periods, today=today)
     
     for i, p in enumerate(periods):
         p_len = calculate_period_length(p)
