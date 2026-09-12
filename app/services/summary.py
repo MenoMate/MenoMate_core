@@ -16,6 +16,7 @@ from app.services.cycle_calculator import (
     estimate_phase,
     predict_next_cycle,
 )
+from app.services.prediction_ledger import maybe_record_served_prediction
 
 
 async def get_current_cycle_summary(
@@ -156,6 +157,24 @@ async def get_current_cycle_summary(
         source = "user_logged"
 
     avg_cycle_len = round(sum(cycle_lengths) / len(cycle_lengths)) if cycle_lengths else (usual_cycle or None)
+
+    # Phase 3 instrumentation (observational only): snapshot the served model
+    # prediction into the ledger. Never alters the computed summary. The
+    # serving route commits; non-model sources and empty states record nothing.
+    if active_period is not None:
+        await maybe_record_served_prediction(
+            db,
+            user_id,
+            predicted_at=today,
+            predicted_cycle_length=predicted_length,
+            predicted_next_period=predicted_next_period,
+            confidence=confidence,
+            source=source,
+            basis_start=active_period.period_start,
+            basis_intervals=len(cycle_lengths),
+            variability=prediction.variability_std_dev,
+            basis_usual=usual_cycle,
+        )
 
     # 5. Fetch today's daily log
     today_log_stmt = (

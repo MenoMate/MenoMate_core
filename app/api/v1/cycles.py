@@ -17,6 +17,7 @@ from app.schemas.cycle import (
     CycleUpdate,
 )
 from app.services.cycle_calculator import calculate_period_length
+from app.services.prediction_ledger import resolve_for_new_start
 from app.services.profile import get_or_create_profile
 from app.services.summary import get_current_cycle_summary
 
@@ -75,6 +76,8 @@ async def get_current_cycle(
     db: AsyncSession = Depends(get_db),
 ) -> CurrentCycleResponse:
     summary = await get_current_cycle_summary(db, current_user_id)
+    # Persist the ledger snapshot flushed by the summary service.
+    await db.commit()
     return CurrentCycleResponse(
         has_data=summary["has_data"],
         current_cycle_day=summary["current_cycle_day"],
@@ -259,6 +262,10 @@ async def create_cycle(
             status_code=status.HTTP_409_CONFLICT,
             detail="A period starting on this date already exists for this user.",
         )
+    # A newly logged start resolves the open ledger prediction anchored
+    # before it (observational only; never affects the logged cycle).
+    await resolve_for_new_start(db, current_user_id, cycle.period_start)
+    await db.commit()
     return _to_cycle_response(cycle)
 
 

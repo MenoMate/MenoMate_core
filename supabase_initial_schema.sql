@@ -92,3 +92,27 @@ CREATE TABLE IF NOT EXISTS public.therapy_sessions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_therapy_sessions_user ON public.therapy_sessions(user_id);
+
+-- 7. Prediction Ledger Table (Phase 3 instrumentation, observational only)
+-- One row per served model prediction; resolved when the actual next period
+-- start is observed. Never read by prediction or response code paths.
+CREATE TABLE IF NOT EXISTS public.prediction_ledger (
+    id SERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES public.profiles(user_id) ON DELETE CASCADE,
+    predicted_at DATE NOT NULL,
+    method VARCHAR(64) NOT NULL,
+    predicted_cycle_length INTEGER,
+    predicted_next_period DATE,
+    confidence VARCHAR(32) NOT NULL,
+    source VARCHAR(32) NOT NULL,
+    basis_start DATE NOT NULL,
+    basis_intervals INTEGER NOT NULL,
+    basis_usual INTEGER,
+    variability DOUBLE PRECISION,
+    resolved_actual_start DATE,
+    error_days INTEGER,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_prediction_ledger_user ON public.prediction_ledger(user_id);
+CREATE INDEX IF NOT EXISTS idx_prediction_ledger_user_predicted_at ON public.prediction_ledger(user_id, predicted_at);

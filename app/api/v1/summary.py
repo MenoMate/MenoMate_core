@@ -20,6 +20,8 @@ async def get_current_summary(
     db: AsyncSession = Depends(get_db),
 ) -> CurrentSummaryResponse:
     summary_data = await get_current_cycle_summary(db, current_user_id)
+    # Persist the ledger snapshot flushed by the summary service.
+    await db.commit()
     return CurrentSummaryResponse(**summary_data)
 
 
