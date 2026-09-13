@@ -1,316 +1,198 @@
 # MenoMate Core
 
-MenoMate Core is the central API and intelligence service for the MenoMate autonomous menstrual wellness system. Built with FastAPI, SQLAlchemy 2.0 asynchronous ORM, and Supabase PostgreSQL, the backend provides cycle analytics, daily symptom and mood tracking, wearable therapy session management, and a deterministic safety-constrained recommendation engine for dynamic thermal and vibration relief.
+FastAPI backend for MenoMate: authenticated, user-scoped business logic over Supabase PostgreSQL. It owns cycle math, predictions, daily logs, Care context, therapy policy, and device records. The Flutter app ([menomate-mobile](../menomate-mobile/README.md)) is its only client; browsers never talk to it directly.
+
+> Status labels used below: **implemented** (in production paths), **planned** (agreed, not built), **experimental** (evaluated offline, not served).
 
 ## Overview
 
-MenoMate is an integrated menstrual wellness platform designed to address dysmenorrhea through real-time symptom tracking and personalized, non-invasive physical therapy. The ecosystem consists of:
+MenoMate is a menstrual wellness system: a Flutter app, this backend, Supabase (PostgreSQL + Auth), and a planned ESP32 wearable. This repository contains only the backend.
 
-- Flutter mobile application (`menomate-mobile`): Cross-platform client interfacing with end users and communicating locally with wearable hardware via Bluetooth Low Energy (BLE).
-- FastAPI backend (`menomate-core`): Central service responsible for authenticated business logic, cycle projection, daily logging, data aggregation, and safety-bound therapy policy calculation.
-- Supabase PostgreSQL: Managed relational database storing user profiles, cycle occurrences, daily symptom logs, device associations, and therapy sessions.
-- Supabase Auth: Secure user authentication issuing JSON Web Tokens (JWT) verified on every protected API endpoint.
-- Standalone ESP32 wearable: Planned hardware band with integrated heating elements, vibration actuators, and onboard thermal regulation.
-- BLE communication: Direct wireless link between the mobile handset and the wearable, keeping hardware control local and responsive.
-
-## System Architecture
+## Architecture
 
 ```text
-Flutter Mobile App (menomate-mobile)
-       |
-       | HTTPS (Bearer JWT)
-       v
-FastAPI Backend (menomate-core)
-       |
-       +---- Supabase Auth (JWT signature, expiration, issuer, audience verification)
-       |
-       +---- Supabase PostgreSQL (User-scoped persistence)
-       |
-       +---- AI / Care Layer (Contextual assistance, non-diagnostic guidance)
-       |
-       +---- Deterministic Therapy Policy (Strict 44.0 C ceiling)
-       |
-       v
-Flutter Mobile Handset
-       |
-       | Bluetooth Low Energy (BLE)
-       v
-ESP32 Wearable Controller (Planned Hardware)
-       |
-       +---- Temperature Sensor (Continuous monitoring)
-       +---- Heating Pad (Controlled thermal delivery)
-       +---- Vibration Motors (Pulse and wave stimulation)
-       +---- Planned Independent Hardware Thermal Cutoff (45.0 C fail-safe)
+Flutter app (menomate-mobile)
+        |  HTTPS, Supabase JWT Bearer
+        v
+FastAPI (this repo) ── user-scoped queries only
+        +-- Supabase Auth (JWT verify: signature, expiry, issuer, audience)
+        +-- Supabase PostgreSQL (DATE dates, TIMESTAMPTZ instants)
+        +-- Care (intent context + optional Groq LLM, mock fallback)
+        +-- Deterministic therapy policy (44.0 °C ceiling)
+
+Flutter handset <--BLE--> ESP32 wearable (planned hardware, not integrated)
 ```
 
-### Safety Boundary
+Boundaries that must stay intact:
 
-The architecture enforces a strict separation between artificial intelligence and hardware actuation:
-- The AI layer is completely decoupled from hardware control. It has no access to GPIOs, PWM duty cycles, or heating element switches.
-- Therapy recommendations are computed exclusively by a deterministic policy engine in `menomate-core` that caps target temperatures at 44.0 degrees Celsius.
-- The external wearable specification defines an independent hardware-level safety loop in firmware that shuts down heating if temperature exceeds 45.0 degrees Celsius or if BLE heartbeat fails.
+- FastAPI is the only database access layer. Flutter never touches protected database infrastructure.
+- Supabase Auth issues tokens; every protected query is filtered by the authenticated `sub` UUID.
+- Care/LLM output is advisory text only. It cannot command hardware or override therapy limits.
+- Therapy recommendations are deterministic equations, not model output.
+- The mobile app performs no prediction or phase math; the server is authoritative.
+- Daily Insight is served from a deterministic local library inside the mobile app (optional future AI enrichment only). The backend does not generate insights.
 
-## Core Features
-
-- Supabase JWT Authentication: Validates token signature (HS256 symmetric or RS256/ES256 JWKS asymmetric), expiration, issuer, audience (`authenticated`), and extracts UUID `sub`. Every protected query is explicitly scoped to the authenticated user ID.
-- Atomic Onboarding: Initializes user profile settings and optional baseline period record in a single transaction with idempotency safeguards.
-- Menstrual Cycle Tracking: Records period occurrences (`period_start`, `period_end`). Calculates cycle lengths using start-to-start biological math (`current_period_start - previous_period_start`).
-- Transparent Cycle Prediction: Weighted Moving Average (WMA) giving higher weight to recent completed cycles. Falls back to user-provided baseline or returns an explicit `insufficient_data` status with null dates rather than arbitrary estimates.
-- Phase Estimation: Four-phase menstrual cycle approximation (menstrual, follicular, ovulation, luteal) presented clearly as an educational estimate.
-- Relational Daily Wellness Logging: Records daily pain ratings (0 to 10), flow, mood, discharge, notes, and child symptom items validated against a controlled clinical taxonomy.
-- Partial Updates: PATCH endpoints inspect `model_fields_set` to respect explicit null values, allowing users to clear optional fields such as notes or mood.
-- Home and History Analytics: Summaries providing cycle phase, days remaining, prediction confidence, variability standard deviation, and symptom frequency rankings.
-- Device Association: Links wearable hardware identifiers to user accounts with strict ownership checks.
-- Adaptive Therapy Policy: Maps reported pain levels to target temperatures and vibration modes, with an adaptive sensitivity index tuned by post-session user feedback.
-- Contextual Care Assistant: Intent-tailored context builder and non-diagnostic guidance using cautious phrasing and mandatory medical disclaimers.
-
-## AI Design
-
-The AI assistant provides educational wellness insights and empathetic conversational guidance. It adheres to strict design principles:
-
-- Non-Diagnostic Language: Uses cautious phrasing ("may", "can", "some people experience") and never offers clinical diagnoses or prescriptive medical advice.
-- Intent-Specific Context: Inquiries dynamically assemble only the minimal necessary context (cycle status for cycle questions, therapy history for pain relief, recent logs for symptom queries) rather than dumping full user history.
-- Offline Capability: A mock provider is included out of the box, allowing full local testing without requiring external LLM API keys.
-- Zero Direct Hardware Influence: AI cannot override therapy limits, command hardware actuators, or alter firmware settings.
-
-## Database Schema
-
-The database is structured in PostgreSQL with foreign keys cascading from `profiles.user_id`:
-
-- `profiles`: User preferences, usual cycle baseline, display units, theme, and adaptive sensitivity index. Primary key references `auth.users(id)`.
-- `cycles`: Menstrual period bleeding occurrences with `period_start` and nullable `period_end`.
-- `daily_logs`: One daily wellness entry per user per calendar date containing pain score (0 to 10), mood, discharge, flow, and notes.
-- `symptom_logs`: Child records attached to `daily_logs` identifying specific symptoms and severity scores (0 to 10).
-- `devices`: BLE wearable hardware identifiers, paired firmware version, and connection timestamps.
-- `therapy_sessions`: Log of completed therapy sessions recording mode, applied temperature, vibration parameters, pre/post pain scores, and relief feedback.
-
-## API Endpoints
-
-The API defines **27 total operations across 20 unique URL paths**:
-- **25 Production API v1 Operations** across 18 unique `/api/v1/...` paths (24 authenticated user-scoped operations and 1 public symptom taxonomy).
-- **2 Root / Health Operations** (`GET /` and `GET /health`).
-
-All endpoints except `/health`, `/`, and `GET /api/v1/symptoms` require a valid Supabase JWT Bearer token in the `Authorization` header.
-
-### Authentication & Profile
-- `GET /api/v1/auth/me`: Retrieve authenticated user identity and profile.
-- `GET /api/v1/profile`: Retrieve user profile settings.
-- `PATCH /api/v1/profile`: Update profile preferences and usual cycle lengths (pass null to reset unsure values; sensitivity index is managed strictly by the backend therapy adaptation engine).
-- `DELETE /api/v1/profile`: Delete user application records (cascades across all user tables). Note: Supabase Auth user deletion requires Supabase Admin API credentials.
-
-### Onboarding
-- `POST /api/v1/onboarding/complete`: Atomically create profile and optional initial period record with cycle validation and idempotency safeguards.
-
-### Cycles
-- `GET /api/v1/cycles/current`: Retrieve active cycle status, phase, bleeding flag, and next period prediction.
-- `POST /api/v1/cycles/current/end`: End the active ongoing menstrual period for the current user (sets `period_end` to specified date or today).
-- `GET /api/v1/cycles`: List all logged menstrual bleeding occurrences for the user.
-- `POST /api/v1/cycles`: Log a new period occurrence with overlap, duration, and future-date validation.
-- `PATCH /api/v1/cycles/{cycle_id}`: Update or close an ongoing period occurrence (explicitly pass `period_end=null` to reopen).
-
-### Daily Logs & Symptoms
-- `GET /api/v1/symptoms`: Static catalogue of supported symptom types and metadata.
-- `GET /api/v1/logs/{log_date}`: Retrieve daily log and child symptoms for a calendar date.
-- `GET /api/v1/logs`: Query daily logs within an optional start and end date range.
-- `POST /api/v1/logs`: Create or replace complete daily log for the date (full day upsert).
-- `PATCH /api/v1/logs/{log_id}`: Partially update a daily log entry (supports clearing optional fields with null).
-
-### Analytics & Summary
-- `GET /api/v1/summary/current`: High-level dashboard summary metrics for the active cycle.
-- `GET /api/v1/summary/history`: Longitudinal cycle history, variability, and symptom distributions.
-
-### Wearable Devices
-- `GET /api/v1/devices`: List all wearable devices associated with the authenticated user.
-- `POST /api/v1/devices`: Register a new wearable hardware identifier.
-- `DELETE /api/v1/devices/{device_id}`: Unpair and delete a wearable device.
-
-### Therapy Controls
-- `POST /api/v1/therapy/recommend`: Compute deterministic thermal and vibration recommendations.
-- `GET /api/v1/therapy/sessions`: List past wearable therapy sessions for the user.
-- `POST /api/v1/therapy/sessions`: Record completed therapy session telemetry and patient relief scores (historical logging only; does not execute hardware commands).
-- `PATCH /api/v1/therapy/sessions/{session_id}`: Update post-session relief score and tune adaptive sensitivity (single application; immutable feedback).
-
-### Care Assistant
-- `POST /api/v1/care/interactions`: Guided care assistant with deterministic red-flag emergency triage, structured intent routing (CareIntentEnum), and context-tailored guidance (stateless).
-
-## Local Development
-
-### Prerequisites
-
-- Python 3.11 or 3.12
-- PostgreSQL (or local SQLite for automated tests)
-- Git
-
-### Setup Steps
-
-1. Clone the repository and navigate to the project root:
-   ```bash
-   git clone <YOUR_GITHUB_REPOSITORY_URL>
-   cd menomate-core
-   ```
-
-2. Create and activate a Python virtual environment:
-   ```bash
-   python -m venv .venv
-   .venv\Scripts\activate  # Windows PowerShell / CMD
-   # or source .venv/bin/activate on macOS / Linux
-   ```
-
-3. Install project dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. Configure environment variables:
-   ```bash
-   copy .env.example .env  # Windows
-   # or cp .env.example .env on macOS / Linux
-   ```
-   Update `.env` with your Supabase project credentials.
-
-5. Database setup:
-   - Execute `supabase_initial_schema.sql` in the Supabase SQL Editor to initialize all tables, constraints, and indexes.
-
-6. Run the automated test suite:
-   ```bash
-   pytest -v
-   ```
-
-7. Start the FastAPI development server:
-   ```bash
-   uvicorn app.main:app --reload --port 8000
-   ```
-
-8. Access interactive documentation:
-   - Swagger UI: `http://localhost:8000/docs`
-   - ReDoc: `http://localhost:8000/redoc`
-   - Health check: `http://localhost:8000/health`
-
-9. Mobile client connection over USB (optional):
-   ```bash
-   # Route mobile requests to local development backend
-   adb reverse tcp:8000 tcp:8000
-   ```
-
-## Environment Variables
-
-| Variable | Required | Description | Scope |
-|---|---|---|---|
-| `PROJECT_NAME` | No | Service name identifier (default `MenoMate Core Backend`) | Server-side only |
-| `DATABASE_URL` | Yes | PostgreSQL connection string (`postgresql+asyncpg://...`) | Server-side only |
-| `SUPABASE_JWT_SECRET` | Optional | Supabase JWT secret used for legacy/symmetric HS256 verification. Optional when asymmetric ES256/RS256 signing is used. | Server-side only |
-| `SUPABASE_URL` | Yes | Base URL of the Supabase project (used for issuer and JWKS discovery) | Server-side only |
-| `ALLOWED_ORIGINS` | No | Allowed CORS origins (comma-separated list or `*`, default `*`) | Server-side only |
-| `AUTO_CREATE_TABLES` | No | Automatically run DDL on startup (default `false`) | Server-side only |
-| `GROQ_API_KEY` | Optional | Groq Cloud API key for AI Care Assistant LLM inference. Falls back to mock provider if unset. | Server-side only |
-| `GROQ_MODEL` | No | Groq LLM model name (default `openai/gpt-oss-120b` or configured model) | Server-side only |
-
-Never expose `DATABASE_URL` or `SUPABASE_JWT_SECRET` to client applications.
-
-## Project Structure
+## Repository structure
 
 ```text
-menomate-core/
+MenoMate_core/
 ├── app/
-│   ├── api/
-│   │   └── v1/
-│   │       ├── auth.py              # Identity verification and session info
-│   │       ├── care.py              # Guided care assistant interaction
-│   │       ├── cycles.py            # Period logging and cycle status
-│   │       ├── devices.py           # Wearable device management
-│   │       ├── logs.py              # Daily wellness logs and symptoms
-│   │       ├── onboarding.py        # First-time profile initialization
-│   │       ├── profile.py           # User preferences and data deletion
-│   │       ├── summary.py           # Active cycle and historical analytics
-│   │       └── therapy.py           # Recommendation policy and sessions
-│   ├── core/
-│   │   ├── config.py                # Pydantic BaseSettings configuration
-│   │   └── security.py              # Supabase JWT signature and claims check
-│   ├── db/
-│   │   ├── base.py                  # Declarative SQLAlchemy Base
-│   │   └── session.py               # Async engine and session generator
-│   ├── models/                      # SQLAlchemy ORM models
-│   ├── schemas/                     # Pydantic request and response contracts
-│   ├── services/                    # Cycle math, therapy policy, AI router
-│   └── main.py                      # FastAPI application entry point
-├── tests/                           # Pytest test suite (85 tests)
-├── supabase_initial_schema.sql      # Canonical DDL for database initialization
-├── THIRD_PARTY_NOTICES.md           # Open-source attributions and licenses
-├── requirements.txt                 # Minimum supported dependency versions
-├── pytest.ini                       # Test runner configuration
-└── README.md                        # Documentation
+│   ├── api/v1/            # Route handlers: auth, profile, onboarding,
+│   │                      # cycles, logs, summary, devices, therapy, care
+│   ├── core/              # config.py (env), security.py (JWT verification)
+│   ├── db/                # base.py (Base), session.py (async engine)
+│   ├── models/            # SQLAlchemy ORM tables (source of truth for columns)
+│   ├── schemas/           # Pydantic request/response contracts + validators
+│   ├── services/          # cycle_calculator, summary, timezone, profile,
+│   │                      # prediction_ledger, backtest, care, ai_context,
+│   │                      # ai_provider, therapy_policy
+│   └── main.py            # App entrypoint, router wiring, / and /health
+├── tests/                 # pytest suite (sqlite in-memory, deterministic)
+├── migrations/            # Ordered SQL migrations for existing databases
+├── supabase_initial_schema.sql  # Canonical DDL for a FRESH database
+├── scratch/               # Throwaway manual probes, not production code
+├── requirements.txt
+├── pytest.ini
+└── .env.example           # Variable NAMES with placeholder values only
 ```
 
-## Safety Architecture
+## Current capabilities
 
-Patient safety is fundamental to the MenoMate platform:
+**Implemented:**
 
-- Temperature Ceiling: The backend recommendation engine enforces a strict mathematical ceiling of 44.0 degrees Celsius. Under no circumstances will a recommendation exceed this threshold.
-- Deterministic Policy: Thermal and vibration setpoints are produced through deterministic equations rather than opaque neural network outputs.
-- Planned Wearable Protection: The external ESP32 wearable hardware specification specifies hardware thermistor monitoring with an independent thermal cutoff at 45.0 degrees Celsius, separate from application software.
-- Activity Timeouts: Therapy recommendations include duration limits to prevent prolonged continuous exposure to heat.
-- Data Ownership: All database queries enforce strict user scoping using validated JWT claims, preventing cross-user data leakage.
+- Supabase JWT verification (HS256 secret or JWKS asymmetric; expiry, issuer, audience `authenticated`, UUID `sub`).
+- Profiles + atomic onboarding (profile and first period in one transaction, idempotent re-onboarding).
+- Cycle tracking: `period_start` / nullable `period_end`, overlap + duration + future-date validation, retrospective "ended today", reopen semantics.
+- Daily logs/symptoms: full-day upsert keyed on `(user, log_date)`, PATCH with explicit-null clearing, controlled symptom taxonomy.
+- Summaries: current-cycle status (day, phase, bleeding, prediction, confidence, status) and history (lengths, variability, symptom frequencies).
+- Prediction: robust recency-weighted predictor over completed intervals (MAD-trimmed, clamped 20–45d), explicit `insufficient_data` instead of guesses, `prediction_status` (`upcoming` / `today` / `awaiting_next_start`), confidence labels.
+- Prediction ledger: observational per-serving snapshots, resolved by later starts (see below).
+- Care: intent-routed context builder + deterministic red-flag triage, Groq LLM optional with mock fallback.
+- Therapy: deterministic recommendation policy (44.0 °C ceiling), session telemetry logging, device ownership checks, single-use feedback.
+- Devices: register / list / unpair BLE hardware identifiers.
+- User-local calendar semantics via stored IANA timezone (see below).
 
-## Current Status
+**Planned / not built:** managed cloud deployment, local-notification scheduling (blocked on nothing — needs product decision), deeper daily-log personalization, hardware integration and validation, multi-year variability modeling.
 
-- Implemented in backend (`menomate-core`):
-  - Supabase JWT authentication supporting HS256 and asymmetric JWKS verification with expiration, issuer, audience (`authenticated`), and UUID `sub` validation
-  - Cycle tracking engine with start-to-start cycle length math, period duration limits, and explicit null reopening semantics
-  - Weighted moving average prediction with fallback handling and null indicators on insufficient data
-  - Relational daily wellness logging with validated symptoms taxonomy, full day upsert, and PATCH field clearing
-  - Deterministic therapy recommendation engine with 44.0 C safety ceiling, device ownership verification, and single feedback application under concurrency
-  - Wearable device association and therapy session tracking
-  - Stateless AI care assistant with intent-tailored context and cautious phrasing
-  - Canonical PostgreSQL schema DDL (`supabase_initial_schema.sql`)
-  - Comprehensive automated test suite (85 tests covering JWT auth requirements A–T, complete API contract regression including DELETE device 401, atomic onboarding rollback & concurrency, cycles, logs, therapy, care, and emergency safety triage)
+**Experimental (evaluated offline, NOT served):** hierarchical/Bayesian and skip-aware candidate predictors were backtested against the production predictor; result was insufficient evidence to change anything, so production still serves the robust WMA only. Experiment code lives outside serving paths.
 
-- In Progress:
-  - Integration with the Flutter mobile client (`menomate-mobile`)
-  - Verification of BLE communication protocols between mobile client and ESP32 wearable prototype
+## Prediction system
 
-- Planned Hardware & Ecosystem Work:
-  - ESP32 hardware production and firmware verification
-  - Long-term cycle regularity modeling
-  - Direct BLE diagnostic tools within the mobile client
+High level, no trivia: recent completed start-to-start intervals → median/MAD outlier trim → recency-weighted mean → clamp 20–45 days. Only observed starts (`period_start <= today`) train; future display-only dates never do. Confidence (`low`/`moderate`/`high`) reflects usable history depth and MAD spread. `prediction_status` and `days_until_next_period` are computed against the **user-local today** (below), never negative (clamped to `awaiting_next_start`). Phase (`menstrual`/`follicular`/`ovulation`/`luteal`/`unknown`) is an educational estimate from served values.
 
-## Mobile Application
+## Prediction ledger
 
-The user-facing mobile client is developed as a separate project:
-- Repository: `menomate-mobile`
-- Framework: Flutter 3.x (Dart)
-- Responsibilities: User interface, local BLE communication with the ESP32 wearable, authenticated HTTPS requests to `menomate-core`.
+Evaluation infrastructure, not a feature: each served model prediction snapshots method, lengths, confidence, source, and baseline into `prediction_ledger`; when the actual next start is logged, the open entry resolves with signed `error_days`. It never influences responses. Reads only happen in analysis, never in request paths.
 
-## Hardware
+## Timezone/date semantics
 
-The MenoMate physical device is a planned standalone wearable designed for abdominal or lumbar placement:
-- Microcontroller: ESP32 with integrated Bluetooth Low Energy
-- Thermal Module: Flexible heating element regulated via PWM
-- Actuation: Precision vibration motors for wave-based mechanical relief
-- Safety: Planned hardware thermistor with independent thermal interrupt at 45.0 degrees Celsius
+This is load-bearing for all future date-dependent work:
 
-## Future Work
+- **DATE fields are user calendar dates**, never shifted: `period_start`, `period_end`, `log_date`, `predicted_next_period`, ledger dates. Stored as `DATE`, compared as dates.
+- **Instants stay UTC**: `created_at`, `updated_at`, `last_connected_at`, therapy `started_at`/`ended_at`. Stored as `TIMESTAMPTZ`.
+- **User-local "today"** = now → `profiles.timezone` (IANA, e.g. `Asia/Kolkata`) → local date (`app/services/timezone.py`). All summary/status/countdown/default/validation paths use it. NULL timezone (legacy users) explicitly falls back to the UTC date until the device syncs; never hard-code a zone.
+- Do not pass DATE-only values through UTC conversion anywhere.
 
-- Deployment to managed cloud container infrastructure
-- Advanced non-linear cycle variability modeling across multi-year intervals
-- Direct BLE diagnostic tools within the mobile client
-- Clinical evaluation of combined thermal and vibrational therapy protocols
+## Authentication
 
-## Demo
+Flutter signs in via Supabase Auth → sends the access token as `Authorization: Bearer` → `get_current_user` verifies signature/expiry/issuer/audience → routes filter every query by that UUID. Secret handling: `SUPABASE_JWT_SECRET` (HS256 legacy) or JWKS discovery from `SUPABASE_URL` (asymmetric, preferred). Secrets live in server `.env` only — never in the mobile repo, logs, or docs.
 
-- Current status: Not deployed yet.
-- Live Demo: Coming soon
+## Environment variables
 
-Future updates to this section will link to the deployed backend documentation, mobile demonstration recordings, and hardware walkthroughs.
+Names only (see `.env.example` for placeholders). All server-only; never commit real values.
+
+| Variable | Required | Notes |
+|---|---|---|
+| `PROJECT_NAME` | No | Service label |
+| `API_V1_STR` | No | Route prefix, default `/api/v1` |
+| `DATABASE_URL` | Yes | `postgresql+asyncpg://…`; tests override with in-memory sqlite |
+| `SUPABASE_URL` | Yes | Also feeds JWKS discovery + issuer check; rejects placeholders at startup |
+| `SUPABASE_JWT_SECRET` | Optional | Only for legacy HS256; omit with asymmetric signing |
+| `SUPABASE_JWKS_URL` | No | Override JWKS endpoint; derived from `SUPABASE_URL` by default |
+| `ALLOWED_ORIGINS` | No | CORS list or `*` (default `*`) |
+| `AUTO_CREATE_TABLES` | No | DDL on startup; default `false` (use the SQL files instead) |
+| `GROQ_API_KEY` | No | Care LLM; unset → deterministic mock provider |
+| `GROQ_MODEL` | No | Default `openai/gpt-oss-120b` |
+
+## Running locally
+
+Verified commands (Windows PowerShell shown; macOS/Linux equivalents in parentheses):
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate          # (source .venv/bin/activate)
+pip install -r requirements.txt # Python 3.11+, developed on 3.12; adds tzdata for zoneinfo on Windows
+copy .env.example .env          # (cp .env.example .env) then fill Supabase values
+```
+
+Database: execute `supabase_initial_schema.sql` in the Supabase SQL editor for a fresh project. For an existing database, apply `migrations/` in filename order (e.g. `0002_add_profile_timezone.sql`). Keep both files agreeing when models change.
+
+```bash
+pytest -q
+```
+
+Docs + health: `http://localhost:8000/docs` (Swagger UI), `.../redoc`, `.../health`. Mobile-on-USB: `adb reverse tcp:8000 tcp:8000`.
+
+## API
+
+By domain (request/response shapes live in `app/schemas/`; exact contracts in Swagger at `/docs`):
+
+- Auth: `GET /api/v1/auth/me`
+- Profile: `GET` / `PATCH` / `DELETE /api/v1/profile` (PATCH accepts IANA `timezone`)
+- Onboarding: `POST /api/v1/onboarding/complete` (atomic profile + first period)
+- Cycles: `GET /api/v1/cycles/current`, `POST /api/v1/cycles/current/end`, `GET` / `POST /api/v1/cycles`, `PATCH /api/v1/cycles/{id}`
+- Logs: `GET /api/v1/symptoms` (public), `GET /api/v1/logs/{date}`, `GET /api/v1/logs`, `POST /api/v1/logs` (upsert), `PATCH /api/v1/logs/{id}`
+- Summaries: `GET /api/v1/summary/current`, `GET /api/v1/summary/history`
+- Devices: `GET` / `POST /api/v1/devices`, `DELETE /api/v1/devices/{id}`
+- Therapy: `POST /api/v1/therapy/recommend`, `GET` / `POST /api/v1/therapy/sessions`, `PATCH /api/v1/therapy/sessions/{id}`
+- Care: `POST /api/v1/care/interactions` (+ `/interact` alias)
+- Root: `GET /`, `GET /health`
+
+## Database
+
+Supabase PostgreSQL. Access model: FastAPI opens one async engine; **row-level security is NOT enabled** — isolation comes from every query filtering on the authenticated user id, with `ON DELETE CASCADE` from `profiles`. Tables: `profiles` (incl. IANA `timezone`), `cycles` (`DATE` ranges), `daily_logs` + `symptom_logs`, `devices`, `therapy_sessions` (`TIMESTAMPTZ`), `prediction_ledger`. Fresh DBs use `supabase_initial_schema.sql`; live DBs use `migrations/`. Tests run on in-memory sqlite via `Base.metadata.create_all`, so they never touch real infrastructure.
+
+## Safety architecture
+
+Intended hierarchy (implemented vs planned stated explicitly):
+
+1. API software ceiling — **implemented**: deterministic policy caps recommendations at 44.0 °C.
+2. Deterministic therapy policy — **implemented** (`therapy_policy.py`, no model output).
+3. ESP32 firmware bounds + temperature sensing + heartbeat loss cutoff — **planned**: no firmware in this repo, nothing validated.
+4. Independent hardware thermal protection (45.0 °C fail-safe) — **planned**, not physically validated.
+5. Care/LLM → hardware air gap — **implemented by construction**: Care returns text; no code path from LLM output to actuation.
+
+Never present hardware safety as validated: there is no hardware test evidence in this repository.
+
+## Testing
+
+```bash
+pytest -q
+```
+
+Suite status (2026-09-13 snapshot): 151 collected, 148 passing, 3 known pre-existing failures, all in duplicate-start upsert expectations (`test_api_contract_409…`, `test_cycle_overlapping…`, `test_cycle_duplicate…`) — documented, unrelated to active work. Organization: `test_auth.py` (JWT matrix), `test_api_contract.py`, `test_cycles/logs/onboarding/summary` (routes + validation), `test_cycle_calculator.py` (math vectors, explicit `today`), `test_backtest.py` (walk-forward harness equivalence), `test_prediction_ledger.py`, `test_timezone.py` (frozen-clock ahead/behind UTC proofs, midnight boundaries, fallback), `test_care.py`, `test_therapy_and_devices.py`. New date logic must add frozen-clock tests, never depend on the machine timezone. (On locked-down Windows checkouts where `.pytest_cache` is read-only, add `-p no:cacheprovider`.)
+
+## Development rules
+
+- No secrets in code, logs, docs, or the mobile repo.
+- No LLM output reaches hardware paths; therapy stays deterministic equations.
+- No second predictor: mobile displays server values; `calculate_cycle_lengths(today=…)` always takes an explicit user-local date in production paths.
+- DATE stays DATE: never convert calendar fields through UTC; timestamps stay `TIMESTAMPTZ`.
+- Every new query filters by authenticated user; every new column updates model + schema + migration + tests.
+- Keep `supabase_initial_schema.sql` and `migrations/` agreeing.
+
+## Known limitations / future work
+
+- Hardware integration and on-device validation (planned, no firmware here).
+- Push-notification scheduling (planned; timezone work in this repo unblocks it).
+- Deeper daily-log personalization (planned).
+- More resolved predictions needed before any model comparison (ledger collects them; bar is thousands, see checkpoint docs).
+- Managed cloud deployment (planned).
+
+## Mobile client
+
+Separate repository: [menomate-mobile](../menomate-mobile/README.md) (Flutter 3.x). It owns UI, offline-first storage, BLE, and the Daily Insight local library.
 
 ## License
 
-This project is developed under the MIT License. See `LICENSE` for details.
-
-## Third-Party Notices
-
-This project incorporates architectural patterns and algorithmic inspirations from open-source biomedical and wellness projects:
-- Mensinator (MIT License): Concepts for start-to-start cycle math and weighted moving average prediction.
-- Metra (GPL-3.0 License): Inspiration for transparent mathematical prediction without neural network opacity.
-- YIMA: Reference for relational symptom tracking schema design.
-
-Detailed license texts and notices are documented in `THIRD_PARTY_NOTICES.md`.
+MIT — see `LICENSE`. Third-party inspirations (Mensinator, Metra, YIMA) are attributed in `THIRD_PARTY_NOTICES.md`.
