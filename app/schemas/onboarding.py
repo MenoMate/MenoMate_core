@@ -16,6 +16,9 @@ class OnboardingRequest(BaseModel):
     usual_period_days: Optional[int] = Field(
         default=None, ge=1, le=12, description="Usual period days or null for 'I\\'m not sure'"
     )
+    timezone: Optional[str] = Field(
+        default=None, max_length=64, description="Device IANA timezone identifier, e.g. Asia/Kolkata"
+    )
 
     @model_validator(mode="after")
     def validate_dates(self) -> "OnboardingRequest":

@@ -1,5 +1,5 @@
 import uuid
-from datetime import date, timedelta
+from datetime import timedelta
 from typing import Any, Dict, List, Optional
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +11,7 @@ from app.models.profile import Profile
 from app.models.therapy_session import TherapySession
 from app.services.cycle_calculator import calculate_cycle_lengths
 from app.services.summary import get_current_cycle_summary
+from app.services.timezone import user_today_for
 
 
 async def build_care_context(
@@ -28,7 +29,9 @@ async def build_care_context(
     - general / other: minimal compact summary.
     """
     summary = await get_current_cycle_summary(db, user_id)
-    today = date.today()
+    # The summary resolves user-local today internally; reuse the same
+    # anchor here so "today" lookups agree with the served summary.
+    today = await user_today_for(db, user_id)
 
     # --- Therapy / Pain Personalization Intent Context ---
     if intent in ("therapy", "pain_help", "therapy_recommendation"):

@@ -5,7 +5,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 def validate_period_dates(period_start: date, period_end: Optional[date] = None) -> None:
-    # Prevent future period start dates (allow +1 day for timezone variance)
+    # Coarse server-relative guard for clock variance (schema validators run
+    # without user context). Routes enforce the exact USER-LOCAL bound
+    # (period dates <= user's local today); see api/v1/cycles.py.
     tomorrow = date.today() + timedelta(days=1)
     if period_start > tomorrow:
         raise ValueError("period_start cannot be in the future")

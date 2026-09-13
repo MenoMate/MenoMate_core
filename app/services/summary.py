@@ -17,6 +17,7 @@ from app.services.cycle_calculator import (
     predict_next_cycle,
 )
 from app.services.prediction_ledger import maybe_record_served_prediction
+from app.services.timezone import user_today, user_today_for
 
 
 async def get_current_cycle_summary(
@@ -24,13 +25,13 @@ async def get_current_cycle_summary(
     user_id: uuid.UUID,
     today: Optional[date] = None,
 ) -> Dict[str, Any]:
-    if today is None:
-        today = date.today()
-
-    # 1. Fetch user profile
+    # 1. Fetch user profile first: the stored IANA timezone defines the
+    # authoritative user-local "today" when the caller passes none.
     profile_stmt = select(Profile).where(Profile.user_id == user_id)
     profile_res = await db.execute(profile_stmt)
     profile = profile_res.scalar_one_or_none()
+    if today is None:
+        today = user_today(profile.timezone if profile else None)
     usual_cycle = profile.usual_cycle_days if profile else None
     usual_period = profile.usual_period_days if profile else 5
 
@@ -235,7 +236,7 @@ async def get_history_summary(
     today: Optional[date] = None,
 ) -> Dict[str, Any]:
     if today is None:
-        today = date.today()
+        today = await user_today_for(db, user_id)
     # Fetch all periods sorted ascending
     stmt = select(Cycle).where(Cycle.user_id == user_id).order_by(Cycle.period_start.asc())
     res = await db.execute(stmt)

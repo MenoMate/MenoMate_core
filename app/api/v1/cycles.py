@@ -1,5 +1,5 @@
 import uuid
-from datetime import date
+from datetime import date, timedelta
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import desc, select
@@ -20,6 +20,7 @@ from app.services.cycle_calculator import calculate_period_length
 from app.services.prediction_ledger import resolve_for_new_start
 from app.services.profile import get_or_create_profile
 from app.services.summary import get_current_cycle_summary
+from app.services.timezone import user_today, user_today_for
 
 router = APIRouter(prefix="/cycles", tags=["Cycles"])
 
@@ -43,6 +44,7 @@ async def check_cycle_overlap(
     period_start: date,
     period_end: Optional[date],
     exclude_cycle_id: Optional[int] = None,
+    today: Optional[date] = None,
 ) -> None:
     stmt = select(Cycle).where(Cycle.user_id == user_id)
     if exclude_cycle_id is not None:
@@ -50,7 +52,10 @@ async def check_cycle_overlap(
     res = await db.execute(stmt)
     existing_cycles = res.scalars().all()
 
-    today = date.today()
+    # Open-ended ranges are bounded by the caller's user-local today;
+    # callers must pass it (never fall back to server-local date here).
+    if today is None:
+        today = await user_today_for(db, user_id)
     effective_end = period_end or today
     for ec in existing_cycles:
         ec_effective_end = ec.period_end or today
@@ -75,7 +80,8 @@ async def get_current_cycle(
     current_user_id: uuid.UUID = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CurrentCycleResponse:
-    summary = await get_current_cycle_summary(db, current_user_id)
+    today = await user_today_for(db, current_user_id)
+    summary = await get_current_cycle_summary(db, current_user_id, today=today)
     # Persist the ledger snapshot flushed by the summary service.
     await db.commit()
     return CurrentCycleResponse(
@@ -108,7 +114,8 @@ async def end_current_cycle(
     current_user_id: uuid.UUID = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CycleResponse:
-    today = date.today()
+    # Retrospective "ended today" uses the USER's local today.
+    today = await user_today_for(db, current_user_id)
     end_date = payload.period_end if (payload and payload.period_end) else today
 
     # 1. Look for ongoing period with period_end IS NULL
@@ -146,6 +153,12 @@ async def end_current_cycle(
             detail="period_end cannot be prior to period_start",
         )
 
+    if end_date > today:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="period_end cannot be in the future",
+        )
+
     if (end_date - cycle.period_start).days > 30:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -158,6 +171,7 @@ async def end_current_cycle(
         period_start=cycle.period_start,
         period_end=end_date,
         exclude_cycle_id=cycle.id,
+        today=today,
     )
 
     cycle.period_end = end_date
@@ -197,7 +211,25 @@ async def create_cycle(
     db: AsyncSession = Depends(get_db),
 ) -> CycleResponse:
     # Ensure profile exists
-    await get_or_create_profile(db, current_user_id)
+    profile = await get_or_create_profile(db, current_user_id)
+    today = user_today(profile.timezone)
+
+    # User-local bounds. period_start keeps the intentional +1 day
+    # display-only tolerance (existing tested behavior), anchored to the
+    # USER's local today instead of the server date. period_end is strict:
+    # never beyond the user's local today (spec: no future dates).
+    # (The schema validator keeps a coarse server-relative guard for
+    # clock variance; these are the precise checks.)
+    if payload.period_start > today + timedelta(days=1):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="period_start cannot be in the future",
+        )
+    if payload.period_end is not None and payload.period_end > today:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="period_end cannot be in the future",
+        )
 
     # Check if user already has an active ongoing period with period_end IS NULL
     stmt_ongoing = select(Cycle).where(
@@ -227,7 +259,6 @@ async def create_cycle(
 
     # If previous period ended on this same start date (e.g. earlier today),
     # adjust previous cycle's end date to yesterday to prevent boundary day collision
-    from datetime import timedelta
     stmt_prev = select(Cycle).where(
         Cycle.user_id == current_user_id,
         Cycle.period_start < payload.period_start,
@@ -245,6 +276,7 @@ async def create_cycle(
         user_id=current_user_id,
         period_start=payload.period_start,
         period_end=payload.period_end,
+        today=today,
     )
 
     cycle = Cycle(
@@ -307,6 +339,24 @@ async def update_cycle(
             detail="period duration cannot exceed 30 days",
         )
 
+    # Exact user-local bounds for explicitly supplied dates (start keeps
+    # the intentional +1 day display-only tolerance, anchored to the
+    # user's local today; end is strict), and user-local open-ended
+    # overlap bounds in all cases.
+    profile = await get_or_create_profile(db, current_user_id)
+    today = user_today(profile.timezone)
+
+    if "period_start" in fields_set and new_start > today + timedelta(days=1):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="period_start cannot be in the future",
+        )
+    if "period_end" in fields_set and new_end and new_end > today:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="period_end cannot be in the future",
+        )
+
     # Check overlap with other periods for this user
     await check_cycle_overlap(
         db=db,
@@ -314,6 +364,7 @@ async def update_cycle(
         period_start=new_start,
         period_end=new_end,
         exclude_cycle_id=cycle_id,
+        today=today,
     )
 
     if "period_start" in fields_set:

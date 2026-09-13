@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     theme VARCHAR(32) NOT NULL DEFAULT 'system',
     units VARCHAR(32) NOT NULL DEFAULT 'metric',
     sensitivity_index DOUBLE PRECISION NOT NULL DEFAULT 1.0 CHECK (sensitivity_index >= 0.5 AND sensitivity_index <= 1.5),
+    timezone VARCHAR(64),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

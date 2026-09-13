@@ -23,6 +23,7 @@ class ProfileBase(BaseModel):
     theme: ThemeEnum = Field(default=ThemeEnum.system)
     units: UnitsEnum = Field(default=UnitsEnum.metric)
     sensitivity_index: float = Field(default=1.0, ge=0.5, le=1.5)
+    timezone: Optional[str] = Field(default=None, max_length=64, description="IANA timezone identifier, e.g. Asia/Kolkata")
 
 
 class ProfileUpdate(BaseModel):
@@ -31,6 +32,7 @@ class ProfileUpdate(BaseModel):
     usual_period_days: Optional[int] = Field(default=None, ge=1, le=12)
     theme: Optional[ThemeEnum] = None
     units: Optional[UnitsEnum] = None
+    timezone: Optional[str] = Field(default=None, max_length=64)
 
 
 class ProfileResponse(ProfileBase):

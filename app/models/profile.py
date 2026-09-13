@@ -27,6 +27,10 @@ class Profile(Base):
     usual_period_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     theme: Mapped[str] = mapped_column(String(32), default="system", nullable=False)
     units: Mapped[str] = mapped_column(String(32), default="metric", nullable=False)
+    # Canonical IANA timezone identifier for user-local calendar semantics
+    # (e.g. "Asia/Kolkata"). NULL only for legacy users until the device
+    # persists it; see app.services.timezone. Never an offset/abbreviation.
+    timezone: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     sensitivity_index: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

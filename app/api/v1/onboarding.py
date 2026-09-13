@@ -1,6 +1,6 @@
 import asyncio
 import uuid
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import StaleDataError
@@ -14,6 +14,7 @@ from app.models.profile import Profile
 from app.schemas.onboarding import OnboardingRequest, OnboardingResponse
 from app.schemas.profile import ProfileResponse
 from app.services.profile import get_or_create_profile
+from app.services.timezone import validate_timezone
 
 router = APIRouter(prefix="/onboarding", tags=["Onboarding"])
 
@@ -46,6 +47,11 @@ async def complete_onboarding(
                 profile.name = payload.name
             profile.usual_cycle_days = payload.usual_cycle_days
             profile.usual_period_days = payload.usual_period_days
+            if payload.timezone is not None:
+                try:
+                    profile.timezone = validate_timezone(payload.timezone)
+                except ValueError as exc:
+                    raise HTTPException(status_code=422, detail=str(exc))
 
             # 2. Check if cycle starting on this date already exists to preserve idempotency
             cycle_stmt = select(Cycle).where(

@@ -6,6 +6,7 @@ pydantic>=2.6.4
 pydantic-settings>=2.2.1
 pyjwt[crypto]>=2.8.0
 python-dotenv>=1.0.1
+tzdata>=2024.1
 aiosqlite>=0.20.0
 pytest>=8.1.0
 pytest-asyncio>=0.23.5

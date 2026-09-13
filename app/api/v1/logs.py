@@ -21,6 +21,7 @@ from app.schemas.daily_log import (
     SymptomMeta,
 )
 from app.services.profile import get_or_create_profile
+from app.services.timezone import user_today_for
 
 router = APIRouter(tags=["Daily Logs & Symptoms"])
 
@@ -104,7 +105,10 @@ async def upsert_daily_log(
     db: AsyncSession = Depends(get_db),
 ) -> DailyLog:
     await _ensure_profile_exists(db, current_user_id)
-    log_date = payload.log_date or date.today()
+    # Omitted log_date defaults to the USER's local today; an explicitly
+    # supplied calendar date is preserved exactly (never shifted).
+    today = await user_today_for(db, current_user_id)
+    log_date = payload.log_date or today
 
     # Find existing daily log for (user_id, log_date)
     stmt = (

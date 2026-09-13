@@ -8,6 +8,7 @@ from app.db.session import get_db
 from app.models.profile import Profile
 from app.schemas.profile import ProfileResponse, ProfileUpdate
 from app.services.profile import get_or_create_profile
+from app.services.timezone import validate_timezone
 
 router = APIRouter(prefix="/profile", tags=["Profile"])
 
@@ -48,6 +49,14 @@ async def update_profile(
         profile.theme = payload.theme.value
     if "units" in fields_set and payload.units is not None:
         profile.units = payload.units.value
+    if "timezone" in fields_set:
+        try:
+            profile.timezone = validate_timezone(payload.timezone)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422),
+                detail=str(exc),
+            )
 
     await db.commit()
     await db.refresh(profile)

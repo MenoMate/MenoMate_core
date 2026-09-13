@@ -20,6 +20,7 @@ from app.schemas.therapy import (
     TherapySessionUpdate,
 )
 from app.services.profile import get_or_create_profile
+from app.services.timezone import user_today
 from app.services.therapy_policy import (
     adjust_sensitivity,
     calculate_therapy_recommendation,
@@ -50,8 +51,8 @@ async def recommend_therapy(
     if payload.pain_score is not None:
         pain = payload.pain_score
     else:
-        # Check today's logged pain
-        today = date.today()
+        # Check today's logged pain (user-local calendar date).
+        today = user_today(profile.timezone)
         stmt = select(DailyLog).where(
             DailyLog.user_id == current_user_id, DailyLog.log_date == today
         )
