@@ -52,11 +52,15 @@ async def build_care_context(
         therapy_res = await db.execute(therapy_stmt)
         sessions = list(therapy_res.scalars().all())
 
-        # Check today's pain
+        # Check today's pain: an explicit value (including 0) wins; a null
+        # pain means "not provided" and falls back to the recent average.
         today_log_stmt = select(DailyLog).where(DailyLog.user_id == user_id, DailyLog.log_date == today)
         today_log_res = await db.execute(today_log_stmt)
         today_log = today_log_res.scalar_one_or_none()
-        current_pain = today_log.pain if today_log else summary.get("recent_pain_avg")
+        if today_log and today_log.pain is not None:
+            current_pain = today_log.pain
+        else:
+            current_pain = summary.get("recent_pain_avg")
 
         has_history = len(sessions) > 0
         recent_feedback = [s.feedback for s in sessions if s.feedback][:5]
@@ -196,7 +200,12 @@ async def build_care_context(
                 "mood": l.mood,
                 "discharge": l.discharge,
                 "flow": l.flow,
-                "symptoms": [s.symptom_type for s in l.symptoms],
+                # Severity travels with each symptom so Care can quote
+                # rated intensity instead of bare presence.
+                "symptoms": [
+                    {"type": s.symptom_type, "severity": s.severity}
+                    for s in l.symptoms
+                ],
             }
             for l in logs
         ]

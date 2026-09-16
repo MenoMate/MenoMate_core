@@ -30,7 +30,10 @@ class DailyLog(Base):
         nullable=False,
     )
     log_date: Mapped[date] = mapped_column(Date, index=True, nullable=False)
-    pain: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Nullable pain (Step 5 semantics): None = user did not provide a pain
+    # value; 0 = user intentionally logged no pain. Historical rows keep
+    # their stored 0 (never reinterpreted as missing).
+    pain: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     mood: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     discharge: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     flow: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)

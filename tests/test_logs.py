@@ -183,3 +183,136 @@ async def test_query_logs_inverted_date_range_rejected(async_client: AsyncClient
     )
     assert res.status_code == 422
     assert "start_date cannot be after end_date" in res.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Structured logging truthfulness: nullable pain, severity, discharge,
+# catalog stability, pain-average correction.
+# ---------------------------------------------------------------------------
+
+EXPECTED_SYMPTOM_IDS = {
+    "cramps", "headache", "back_pain", "nausea", "bloating", "low_energy",
+    "breast_tenderness", "acne", "sleep_difficulty", "appetite_change",
+    "dizziness",
+}
+
+
+@pytest.mark.asyncio
+async def test_symptom_catalog_ids_stable(async_client: AsyncClient):
+    """Pins the canonical catalog: mobile mirrors these ids, so any
+    removal/rename here must update the mobile list in the same change."""
+    res = await async_client.get("/api/v1/symptoms")
+    assert res.status_code == 200
+    assert {s["id"] for s in res.json()} == EXPECTED_SYMPTOM_IDS
+
+
+@pytest.mark.asyncio
+async def test_symptom_payload_validation(async_client: AsyncClient, auth_headers: dict):
+    day = date.today() - timedelta(days=1)
+    bad_id = await async_client.post(
+        "/api/v1/logs", headers=auth_headers,
+        json={"log_date": str(day), "pain": 3,
+              "symptoms": [{"symptom_type": "not_a_symptom", "severity": 5}]},
+    )
+    assert bad_id.status_code == 422
+    bad_sev = await async_client.post(
+        "/api/v1/logs", headers=auth_headers,
+        json={"log_date": str(day), "pain": 3,
+              "symptoms": [{"symptom_type": "cramps", "severity": 11}]},
+    )
+    assert bad_sev.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_symptom_severity_and_discharge_round_trip(
+    async_client: AsyncClient, auth_headers: dict
+):
+    day = date.today() - timedelta(days=1)
+    res = await async_client.post(
+        "/api/v1/logs", headers=auth_headers,
+        json={
+            "log_date": str(day),
+            "pain": 6,
+            "mood": "tired",
+            "flow": "light",
+            "discharge": "light",
+            "symptoms": [
+                {"symptom_type": "cramps", "severity": 6},
+                {"symptom_type": "headache", "severity": 3},
+            ],
+        },
+    )
+    assert res.status_code in (200, 201), res.text
+    body = res.json()
+    assert body["discharge"] == "light"
+    assert {s["symptom_type"]: s["severity"] for s in body["symptoms"]} == {
+        "cramps": 6, "headache": 3,
+    }
+
+    fetched = await async_client.get(f"/api/v1/logs/{day}", headers=auth_headers)
+    assert fetched.status_code == 200
+    assert fetched.json()["symptoms"] == body["symptoms"]
+    assert fetched.json()["discharge"] == "light"
+
+
+@pytest.mark.asyncio
+async def test_pain_null_vs_zero_semantics(async_client: AsyncClient, auth_headers: dict):
+    d_null = date.today() - timedelta(days=3)
+    d_zero = date.today() - timedelta(days=2)
+
+    omitted = await async_client.post(
+        "/api/v1/logs", headers=auth_headers,
+        json={"log_date": str(d_null), "mood": "calm"},
+    )
+    assert omitted.status_code in (200, 201)
+    assert omitted.json()["pain"] is None
+
+    explicit = await async_client.post(
+        "/api/v1/logs", headers=auth_headers,
+        json={"log_date": str(d_zero), "pain": 0, "mood": "calm"},
+    )
+    assert explicit.status_code in (200, 201)
+    assert explicit.json()["pain"] == 0
+
+    get_null = await async_client.get(f"/api/v1/logs/{d_null}", headers=auth_headers)
+    assert get_null.json()["pain"] is None
+    get_zero = await async_client.get(f"/api/v1/logs/{d_zero}", headers=auth_headers)
+    assert get_zero.json()["pain"] == 0
+
+
+@pytest.mark.asyncio
+async def test_recent_pain_avg_excludes_unset(
+    async_client: AsyncClient, auth_headers: dict, db_session
+):
+    from sqlalchemy import select
+    from app.models.daily_log import DailyLog
+    from app.services.summary import get_current_cycle_summary
+    from tests.conftest import TEST_USER_ID
+
+    await async_client.post(
+        "/api/v1/onboarding/complete", headers=auth_headers,
+        json={
+            "name": "Pain Avg",
+            "last_period_start": str(date.today() - timedelta(days=5)),
+            "last_period_end": str(date.today() - timedelta(days=2)),
+        },
+    )
+    await async_client.post(
+        "/api/v1/logs", headers=auth_headers,
+        json={"log_date": str(date.today() - timedelta(days=3)), "mood": "calm"},
+    )
+    await async_client.post(
+        "/api/v1/logs", headers=auth_headers,
+        json={"log_date": str(date.today() - timedelta(days=2)), "pain": 6},
+    )
+    await async_client.post(
+        "/api/v1/logs", headers=auth_headers,
+        json={"log_date": str(date.today() - timedelta(days=1)), "pain": 0},
+    )
+    summary = await get_current_cycle_summary(db_session, TEST_USER_ID)
+    assert summary["recent_pain_avg"] == 3.0
+
+    rows = (
+        await db_session.execute(select(DailyLog).where(DailyLog.user_id == TEST_USER_ID))
+    ).scalars().all()
+    assert {r.pain for r in rows} == {None, 6, 0}

@@ -260,3 +260,89 @@ async def test_log_lookup_reads_back_exact_values(
     assert str(log_day) in data["response_text"]
     assert "pain 5" in data["response_text"]
     assert "tired" in data["response_text"]
+
+
+# ---------------------------------------------------------------------------
+# Real symptom rows end to end (seeded via API, never fabricated).
+# ---------------------------------------------------------------------------
+
+async def _seed_cramps_day(client, headers, day_offset: int, severity: int, pain=None):
+    payload = {
+        "log_date": str(date.today() - timedelta(days=day_offset)),
+        "symptoms": [{"symptom_type": "cramps", "severity": severity}],
+    }
+    if pain is not None:
+        payload["pain"] = pain
+    res = await client.post("/api/v1/logs", headers=headers, json=payload)
+    assert res.status_code in (200, 201), res.text
+    return res.json()
+
+
+@pytest.mark.asyncio
+async def test_care_quotes_logged_cramps_with_severity(
+    async_client: AsyncClient, auth_headers: dict
+):
+    await _seed_cramps_day(async_client, auth_headers, 1, 6, pain=6)
+    res = await async_client.post(
+        "/api/v1/care/interactions", headers=auth_headers,
+        json={"intent": "symptom_insight", "user_message": "cramps today, why do I feel uncomfortable?"},
+    )
+    assert res.status_code == 200
+    text = res.json()["response_text"]
+    assert "cramps" in text
+    assert "severity 6" in text
+
+
+@pytest.mark.asyncio
+async def test_single_observation_makes_no_frequency_claim(
+    async_client: AsyncClient, auth_headers: dict
+):
+    await _seed_cramps_day(async_client, auth_headers, 1, 4, pain=4)
+    res = await async_client.post(
+        "/api/v1/care/interactions", headers=auth_headers,
+        json={"intent": "symptom_insight", "user_message": "cramps again"},
+    )
+    text = res.json()["response_text"].lower()
+    assert "cramps" in text
+    assert "often" not in text
+    assert "you usually get" not in text
+
+
+@pytest.mark.asyncio
+async def test_repeated_rows_surface_in_frequent_symptoms(
+    async_client: AsyncClient, auth_headers: dict, db_session
+):
+    from app.services.summary import get_current_cycle_summary
+    from tests.conftest import TEST_USER_ID
+
+    await async_client.post(
+        "/api/v1/onboarding/complete", headers=auth_headers,
+        json={
+            "name": "Freq",
+            "last_period_start": str(date.today() - timedelta(days=9)),
+            "last_period_end": str(date.today() - timedelta(days=6)),
+        },
+    )
+    await _seed_cramps_day(async_client, auth_headers, 5, 5, pain=5)
+    await _seed_cramps_day(async_client, auth_headers, 3, 6, pain=6)
+    await _seed_cramps_day(async_client, auth_headers, 1, 4, pain=4)
+    summary = await get_current_cycle_summary(db_session, TEST_USER_ID)
+    assert "cramps" in summary["frequent_symptoms"]
+
+
+@pytest.mark.asyncio
+async def test_null_pain_never_rendered(async_client: AsyncClient, auth_headers: dict):
+    day = date.today() - timedelta(days=1)
+    res = await async_client.post(
+        "/api/v1/logs", headers=auth_headers,
+        json={"log_date": str(day), "mood": "calm",
+              "symptoms": [{"symptom_type": "headache", "severity": 2}]},
+    )
+    assert res.status_code in (200, 201)
+    res = await async_client.post(
+        "/api/v1/care/interactions", headers=auth_headers,
+        json={"intent": "wellness_help", "user_message": "What did I log on that day?"},
+    )
+    text = res.json()["response_text"]
+    assert "pain None" not in text
+    assert "headache" in text

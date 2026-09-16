@@ -66,7 +66,8 @@ class SymptomItem(BaseModel):
 
 class DailyLogCreate(BaseModel):
     log_date: Optional[date] = Field(default=None, description="Date for this entry; defaults to today")
-    pain: int = Field(default=0, ge=0, le=10, description="Overall pain/cramp level 0 to 10")
+    # None (omitted) = pain not provided; 0 = explicitly logged no pain.
+    pain: Optional[int] = Field(default=None, ge=0, le=10, description="Overall pain/cramp level 0 to 10, or null when not provided")
     mood: Optional[MoodEnum] = None
     discharge: Optional[DischargeEnum] = None
     flow: Optional[FlowEnum] = None
@@ -94,7 +95,7 @@ class DailyLogResponse(BaseModel):
     id: int
     user_id: uuid.UUID
     log_date: date
-    pain: int
+    pain: Optional[int]
     mood: Optional[str] = None
     discharge: Optional[str] = None
     flow: Optional[str] = None

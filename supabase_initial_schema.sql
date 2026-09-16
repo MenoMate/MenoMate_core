@@ -39,7 +39,9 @@ CREATE TABLE IF NOT EXISTS public.daily_logs (
     id SERIAL PRIMARY KEY,
     user_id UUID NOT NULL REFERENCES public.profiles(user_id) ON DELETE CASCADE,
     log_date DATE NOT NULL,
-    pain INTEGER NOT NULL DEFAULT 0 CHECK (pain >= 0 AND pain <= 10),
+    -- Nullable pain: NULL = not provided; 0 = explicitly logged no pain.
+    -- The CHECK passes on NULL (unknown) by SQL semantics.
+    pain INTEGER CHECK (pain >= 0 AND pain <= 10),
     mood VARCHAR(32),
     discharge VARCHAR(32),
     flow VARCHAR(32),
