@@ -87,7 +87,7 @@ async def test_care_personalized_inquiry_mock_ai(async_client: AsyncClient, auth
     assert data["is_ai_generated"] is False  # Truthful: MockAIProvider is rule-based mock
     assert "cramp" in data["response_text"].lower() or "heat" in data["response_text"].lower()
     assert "disclaimer" in data
-    assert len(data["suggested_actions"]) > 0
+    assert [a["id"] for a in data["actions"]] == ["open_logger"]
 
 
 @pytest.mark.asyncio
@@ -143,7 +143,8 @@ async def test_care_red_flag_emergency_triage(async_client: AsyncClient, auth_he
     d1 = res1.json()
     assert d1["is_ai_generated"] is False
     assert "URGENT CLINICAL SAFETY ADVISORY" in d1["response_text"]
-    assert "Seek Emergency Care" in d1["suggested_actions"]
+    assert [a["id"] for a in d1["actions"]] == ["seek_emergency_care", "call_doctor"]
+    assert "Seek Emergency Care" in [a["label"] for a in d1["actions"]]
 
     # 2. Test heavy bleeding / hemorrhaging
     res2 = await async_client.post(
@@ -205,7 +206,9 @@ async def test_groq_provider_successful_structured_response():
     assert res["is_ai_generated"] is True
     assert res["response_text"] == "Based on day 3, warm compression can help ease cramps."
     assert res["therapy_profile"] == "MODERATE"
-    assert res["intent"] == "therapy_recommendation"
+    # Step 3 contract: model intent is no longer emitted (routing is
+    # deterministic).
+    assert "intent" not in res
 
     # Verify model and SDK call arguments
     mock_client.chat.completions.create.assert_awaited_once()
@@ -355,7 +358,8 @@ async def test_care_interaction_with_groq_mock_provider(async_client: AsyncClien
     data = res.json()
     assert data["is_ai_generated"] is True
     assert data["therapy_profile"] == "MODERATE"
-    assert "Start Moderate Thermal Therapy" in data["suggested_actions"]
+    assert "Start Moderate Thermal Therapy" in [a["label"] for a in data["actions"]]
+    assert data["actions"][0]["id"] == "view_therapy"
     assert "Moderate warmth" in data["response_text"]
 
 
@@ -381,13 +385,15 @@ async def test_care_red_flag_overrides_groq_ai(async_client: AsyncClient, auth_h
     assert data["is_ai_generated"] is False
     assert data["therapy_profile"] is None
     assert "URGENT CLINICAL SAFETY ADVISORY" in data["response_text"]
-    assert "Seek Emergency Care" in data["suggested_actions"]
+    assert [a["id"] for a in data["actions"]] == ["seek_emergency_care", "call_doctor"]
     # Verify AI provider was NEVER invoked
     mock_client.chat.completions.create.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_care_out_of_scope_redirect(async_client: AsyncClient, auth_headers: dict):
+    # Step 2: out-of-scope is a deterministic fixed refusal — the model is
+    # never invoked (previously asserted is_ai_generated True via Groq).
     mock_client = make_mock_groq_client(
         json.dumps({
             "response": "I'm here to help with your menstrual wellness, cycle data, symptoms, and MenoMate features. I can't help with unrelated topics.",
@@ -405,9 +411,11 @@ async def test_care_out_of_scope_redirect(async_client: AsyncClient, auth_header
     )
     assert res.status_code == 200
     data = res.json()
-    assert data["is_ai_generated"] is True
+    assert data["is_ai_generated"] is False
     assert data["therapy_profile"] is None
     assert "menstrual wellness" in data["response_text"]
+    assert data["actions"] == []
+    mock_client.chat.completions.create.assert_not_awaited()
 
 
 @pytest.mark.asyncio

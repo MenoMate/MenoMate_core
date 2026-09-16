@@ -11,6 +11,7 @@ from app.models.profile import Profile
 from app.models.therapy_session import TherapySession
 from app.services.cycle_calculator import calculate_cycle_lengths
 from app.services.summary import get_current_cycle_summary
+from app.services.therapy_policy import calculate_therapy_recommendation
 from app.services.timezone import user_today_for
 
 
@@ -119,6 +120,24 @@ async def build_care_context(
             for s in sessions[:3]
         ]
 
+        # Deterministic recommendation source (Step 7): the same policy
+        # engine behind POST /therapy/recommend, reduced to the
+        # model-safe subset (profile label + pain). Raw hardware numbers
+        # never enter Care context.
+        recommendation = None
+        if isinstance(current_pain, (int, float)):
+            rec = calculate_therapy_recommendation(
+                pain_score=int(round(current_pain)),
+                sensitivity_index=sensitivity,
+            )
+            rec_profile = None
+            if rec["vibration_mode"] != "off":
+                temp = rec["target_temperature_c"] or 0
+                rec_profile = (
+                    "GENTLE" if temp <= 38.0 else ("MODERATE" if temp <= 41.0 else "STRONG")
+                )
+            recommendation = {"profile": rec_profile, "pain_score": rec["pain_score"]}
+
         return {
             "intent": intent,
             "cycle_day": summary.get("current_cycle_day"),
@@ -135,6 +154,7 @@ async def build_care_context(
             "recent_pattern": recent_pattern,
             "recent_feedback": recent_feedback,
             "recent_therapy_sessions": recent_sessions,
+            "recommendation": recommendation,
         }
 
     # --- Cycle Inquiry Context ---

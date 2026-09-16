@@ -58,19 +58,36 @@ GROQ_CARE_SYSTEM_PROMPT = (
     "6. Never output temperature values, PWM values, GPIO instructions, BLE commands, motor commands, "
     "heater commands, arbitrary therapy duration, or actuator parameters. "
     "The backend is authoritative for safety and final therapy configuration.\n\n"
+    "Authoritative facts (immutable):\n"
+    "The user payload may contain a \"facts\" object with verified MenoMate values (cycle day, phase, "
+    "logged pain, prediction details). Treat every value in \"facts\" as fixed: repeat values exactly "
+    "when relevant and never alter numbers or dates. For missing (null) entries, describe the absence "
+    "plainly instead of inventing a value. Every number or date in your reply MUST come from \"facts\".\n\n"
+    "Follow-up:\n"
+    "You may include at most one brief follow-up question as \"followup\" (or null when the answer is "
+    "complete). A follow-up must be a single question that resolves ambiguity, personalizes the next "
+    "answer, or enables a useful action. Never use filler closers such as \"Would you like to know more?\" "
+    "or \"Anything else?\".\n\n"
     "Output Format:\n"
     "You must strictly output a valid JSON object matching this schema:\n"
     "{\n"
     '  "response": "Empathetic, practical, concise guidance",\n'
-    '  "intent": "care | pattern_summary | therapy_recommendation | feature_help | out_of_scope",\n'
+    '  "followup": "One targeted question" | null,\n'
     '  "therapy_profile": "GENTLE" | "MODERATE" | "STRONG" | null\n'
     "}"
 )
 
 
-class GroqCareStructuredReply(BaseModel):
+class GroqExplainReply(BaseModel):
+    """Structured model output (Step 3 contract).
+
+    Routing intent is intentionally absent: topic routing is deterministic
+    and the model must not reclassify. Extra keys (e.g. a legacy
+    "intent") are tolerated and ignored.
+    """
+
     response: str
-    intent: str = "care"
+    followup: Optional[str] = None
     therapy_profile: Optional[str] = None
 
     @field_validator("therapy_profile", mode="before")
@@ -106,11 +123,16 @@ class BaseAIProvider(ABC):
         context: Dict[str, Any],
         user_message: str,
         intent: Optional[str] = None,
+        facts: Optional[Dict[str, Any]] = None,
+        topic: Optional[str] = None,
+        recent_turns: Optional[list] = None,
     ) -> Dict[str, Any]:
+        # Base (Mock) path ignores select-then-enhance extras: the
+        # deterministic reply is built from context day/phase directly.
         reply = await self.generate_reply(context, user_message, intent)
         return {
             "response_text": reply,
-            "intent": intent or "care",
+            "followup": None,
             "therapy_profile": None,
             "is_ai_generated": self.is_real_ai,
         }
@@ -118,9 +140,10 @@ class BaseAIProvider(ABC):
 
 class MockAIProvider(BaseAIProvider):
     """
-    Mock AI Provider providing safe, empathetic, non-diagnostic guidance
-    for development, testing, and offline environments.
-    Strictly avoids clinical diagnoses or prescribing medication.
+    Deterministic context-aware fallback (Step 4): renders the shared
+    composer frames over the same facts as the enhanced path — same
+    decisions and structure, plainer sentences. Never pretends to be an
+    LLM (is_real_ai stays False) and never invents history.
     """
     is_real_ai: bool = False
 
@@ -130,40 +153,13 @@ class MockAIProvider(BaseAIProvider):
         user_message: str,
         intent: Optional[str] = None,
     ) -> str:
-        cycle_day = context.get("cycle_day", "unknown")
-        phase = context.get("phase", "current")
-        msg_lower = user_message.lower()
+        from app.services.care_composer import compose_ai_reply, render_deterministic_reply
+        from app.services.care_topics import classify_care_topic
 
-        if "cramp" in msg_lower or "pain" in msg_lower or intent in ("pain_help", "therapy_recommendation"):
-            return (
-                f"Around day {cycle_day} ({phase} phase), cramping can feel uncomfortable. "
-                "I'd suggest gentle warmth (like a warm compress or our wearable's safe thermal setting), "
-                "light movement, or resting in a comfortable position for soothing relief. "
-                "If pain feels unusually sharp or severe, please consider speaking with a healthcare professional."
-            )
-        elif "tired" in msg_lower or "fatigue" in msg_lower:
-            return (
-                f"Based on your cycle around day {cycle_day} ({phase} phase), feeling low energy can happen. "
-                "I'd suggest light stretching, staying well-hydrated, and taking extra time for rest to help you feel restored. "
-                "If fatigue feels persistent or overwhelming, consider speaking with a healthcare provider."
-            )
-        elif "nausea" in msg_lower:
-            return (
-                f"Mild nausea can sometimes occur around this time. Small, frequent sips of water or herbal tea "
-                "and plain snacks may feel soothing. If nausea persists or is severe, consult a medical provider."
-            )
-        elif "mood" in msg_lower:
-            return (
-                f"Mood shifts can happen during different parts of your cycle. "
-                "Taking quiet moments for yourself, gentle walks, and prioritizing sleep may help you feel more grounded. "
-                "If mood changes feel unmanageable, a professional can offer personalized support."
-            )
-        else:
-            return (
-                f"Thank you for checking in. In your {phase} phase (cycle day {cycle_day}), tracking your symptoms "
-                "helps build a clearer picture of your personal rhythms. If you ever have health concerns, "
-                "a healthcare provider is best suited to guide you. How else can I support your comfort today?"
-            )
+        ctx = dict(context or {})
+        topic = ctx.get("topic") or classify_care_topic(user_message, intent_hint=intent)
+        composed = compose_ai_reply(topic, ctx, message=user_message)
+        return render_deterministic_reply(composed)
 
 
 class GroqAIProvider(BaseAIProvider):
@@ -199,7 +195,7 @@ class GroqAIProvider(BaseAIProvider):
         reply = await mock.generate_reply(context, user_message, intent)
         return {
             "response_text": reply,
-            "intent": intent or "care",
+            "followup": None,
             "therapy_profile": None,
             "is_ai_generated": False,
         }
@@ -209,6 +205,9 @@ class GroqAIProvider(BaseAIProvider):
         context: Dict[str, Any],
         user_message: str,
         intent: Optional[str] = None,
+        facts: Optional[Dict[str, Any]] = None,
+        topic: Optional[str] = None,
+        recent_turns: Optional[list] = None,
     ) -> Dict[str, Any]:
         if not self.api_key or not self.api_key.strip():
             logger.warning("Groq API key not configured. Falling back to deterministic guidance.")
@@ -217,6 +216,9 @@ class GroqAIProvider(BaseAIProvider):
         prompt_payload = {
             "user_message": user_message,
             "intent": intent,
+            "topic": topic,
+            "facts": facts if facts is not None else {},
+            "recent_turns": recent_turns or [],
             "context": context,
         }
 
@@ -253,18 +255,14 @@ class GroqAIProvider(BaseAIProvider):
                 )
                 return await self._fallback(context, user_message, intent)
 
-            # Validate schema and allowed profile
-            parsed = GroqCareStructuredReply.model_validate(raw_data)
-
-            # Enforce out-of-scope invariant: therapy profile must be None
-            therapy_prof = parsed.therapy_profile
-            if parsed.intent == "out_of_scope":
-                therapy_prof = None
+            # Validate schema and allowed profile (model intent, if present,
+            # is tolerated and ignored: routing is deterministic).
+            parsed = GroqExplainReply.model_validate(raw_data)
 
             return {
                 "response_text": parsed.response,
-                "intent": parsed.intent,
-                "therapy_profile": therapy_prof,
+                "followup": parsed.followup,
+                "therapy_profile": parsed.therapy_profile,
                 "is_ai_generated": True,
             }
         except Exception as e:

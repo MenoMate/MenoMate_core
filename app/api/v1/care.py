@@ -16,12 +16,6 @@ router = APIRouter(prefix="/care", tags=["MenoMate Care Guided Assistance"])
     status_code=status.HTTP_200_OK,
     summary="Guided Care interaction endpoint (deterministic or compact AI response)",
 )
-@router.post(
-    "/interact",
-    response_model=CareInteractionResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Guided Care interaction endpoint alias",
-)
 async def care_interaction(
     payload: CareInteractionRequest,
     current_user_id: uuid.UUID = Depends(get_current_user),
@@ -32,5 +26,6 @@ async def care_interaction(
         user_id=current_user_id,
         intent=payload.intent,
         user_message=payload.user_message,
+        recent_turns=[t.model_dump() for t in payload.recent_turns],
     )
     return CareInteractionResponse(**interaction_data)
