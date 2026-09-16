@@ -6,8 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 @pytest.mark.asyncio
 async def test_onboarding_normal_flow(async_client: AsyncClient, auth_headers: dict):
+    # NOTE: end uses date.today()-1 (not date.today()) because onboarding
+    # enforces strict USER-LOCAL bounds (NULL timezone -> UTC fallback) while
+    # date.today() is server-local; on machines ahead of UTC the two differ.
     start = date.today() - timedelta(days=3)
-    end = date.today()
+    end = date.today() - timedelta(days=1)
     payload = {
         "name": "Maya",
         "last_period_start": str(start),
@@ -165,7 +168,7 @@ async def test_onboarding_atomic_rollback_on_failure(
         json={
             "name": "Atomic Rollback User",
             "last_period_start": str(date.today() - timedelta(days=3)),
-            "last_period_end": str(date.today()),
+            "last_period_end": str(date.today() - timedelta(days=1)),
             "usual_cycle_days": 28,
             "usual_period_days": 5,
         },
@@ -198,7 +201,7 @@ async def test_onboarding_concurrent_requests_safe(
     payload = {
         "name": "Concurrent User",
         "last_period_start": str(date.today() - timedelta(days=2)),
-        "last_period_end": str(date.today()),
+        "last_period_end": str(date.today() - timedelta(days=1)),
         "usual_cycle_days": 30,
         "usual_period_days": 5,
     }
@@ -221,3 +224,344 @@ async def test_onboarding_concurrent_requests_safe(
     res = await db_session.execute(prof_stmt)
     profiles = res.scalars().all()
     assert len(profiles) == 1
+
+
+# ---------------------------------------------------------------------------
+# PART A HARDENING (§3): completion contract, user-local bounds, one-time
+# semantics, null handling, isolation. Dates are anchored with a 2-day past
+# margin (never date.today() as an end) so they stay valid under the strict
+# user-local bound on any machine timezone (see note in normal_flow above).
+# ---------------------------------------------------------------------------
+
+def _fresh_headers():
+    import uuid
+    from tests.conftest import make_token
+
+    uid = uuid.uuid4()
+    return uid, {"Authorization": f"Bearer {make_token(uid)}"}
+
+
+def _valid_payload(start, end=None, **overrides):
+    payload = {
+        "name": "Hardening User",
+        "last_period_start": str(start),
+    }
+    if end is not None:
+        payload["last_period_end"] = str(end)
+    payload.update(overrides)
+    return payload
+
+
+@pytest.mark.asyncio
+async def test_onboarding_rejects_null_name(async_client: AsyncClient):
+    _, headers = _fresh_headers()
+    payload = _valid_payload(date.today() - timedelta(days=5))
+    del payload["name"]
+    res = await async_client.post("/api/v1/onboarding/complete", headers=headers, json=payload)
+    assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_onboarding_rejects_empty_name(async_client: AsyncClient):
+    _, headers = _fresh_headers()
+    res = await async_client.post(
+        "/api/v1/onboarding/complete",
+        headers=headers,
+        json=_valid_payload(date.today() - timedelta(days=5), name=""),
+    )
+    assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_onboarding_rejects_whitespace_name(async_client: AsyncClient):
+    _, headers = _fresh_headers()
+    res = await async_client.post(
+        "/api/v1/onboarding/complete",
+        headers=headers,
+        json=_valid_payload(date.today() - timedelta(days=5), name="   "),
+    )
+    assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_onboarding_trims_name(async_client: AsyncClient):
+    _, headers = _fresh_headers()
+    res = await async_client.post(
+        "/api/v1/onboarding/complete",
+        headers=headers,
+        json=_valid_payload(date.today() - timedelta(days=5), name="  Maya  "),
+    )
+    assert res.status_code == 201
+    assert res.json()["profile"]["name"] == "Maya"
+
+
+@pytest.mark.asyncio
+async def test_onboarding_rejects_future_start(async_client: AsyncClient):
+    _, headers = _fresh_headers()
+    res = await async_client.post(
+        "/api/v1/onboarding/complete",
+        headers=headers,
+        json=_valid_payload(date.today() + timedelta(days=10), name="Future Start"),
+    )
+    assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_onboarding_rejects_tomorrow_start_user_local(async_client: AsyncClient):
+    # Strict user-local bound: start == server tomorrow passes the coarse
+    # schema guard, so the route-level user-local check must reject it.
+    # (On machines behind UTC this coincides with the schema guard; the
+    # frozen-clock boundary test below proves the user-local anchor.)
+    _, headers = _fresh_headers()
+    res = await async_client.post(
+        "/api/v1/onboarding/complete",
+        headers=headers,
+        json=_valid_payload(date.today() + timedelta(days=1), name="Tomorrow"),
+    )
+    assert res.status_code in (400, 422)
+
+
+@pytest.mark.asyncio
+async def test_onboarding_rejects_future_end(async_client: AsyncClient):
+    _, headers = _fresh_headers()
+    res = await async_client.post(
+        "/api/v1/onboarding/complete",
+        headers=headers,
+        json=_valid_payload(
+            date.today() - timedelta(days=3),
+            date.today() + timedelta(days=5),
+            name="Future End",
+        ),
+    )
+    assert res.status_code in (400, 422)
+
+
+@pytest.mark.asyncio
+async def test_onboarding_timezone_boundary(async_client: AsyncClient, monkeypatch):
+    """User-local today (not server-local) is authoritative.
+
+    Frozen instant 2026-06-01T05:00Z: UTC date is Jun 1, Pacific/Midway
+    (UTC-11) is still May 31. A May-31 start with the Midway zone must be
+    accepted; a Jun-1 start with the Midway zone is future and rejected —
+    even though Jun 1 <= server/UTC today.
+    """
+    from datetime import datetime, timezone as dt_timezone
+
+    import app.services.timezone as tz_module
+
+    frozen = datetime(2026, 6, 1, 5, 0, tzinfo=dt_timezone.utc)
+    monkeypatch.setattr(tz_module, "_utcnow", lambda: frozen)
+
+    _, h1 = _fresh_headers()
+    ok = await async_client.post(
+        "/api/v1/onboarding/complete",
+        headers=h1,
+        json=_valid_payload("2026-05-31", "2026-05-31",
+                            name="Boundary OK", timezone="Pacific/Midway"),
+    )
+    assert ok.status_code == 201, ok.text
+
+    _, h2 = _fresh_headers()
+    future = await async_client.post(
+        "/api/v1/onboarding/complete",
+        headers=h2,
+        json=_valid_payload("2026-06-01", name="Boundary Future",
+                            timezone="Pacific/Midway"),
+    )
+    assert future.status_code == 400, future.text
+
+
+@pytest.mark.asyncio
+async def test_onboarding_completed_period_accepted(async_client: AsyncClient):
+    _, headers = _fresh_headers()
+    start = date.today() - timedelta(days=6)
+    end = date.today() - timedelta(days=2)
+    res = await async_client.post(
+        "/api/v1/onboarding/complete", headers=headers, json=_valid_payload(start, end)
+    )
+    assert res.status_code == 201
+    assert res.json()["period_end"] == str(end)
+
+
+@pytest.mark.asyncio
+async def test_onboarding_ongoing_period_accepted(async_client: AsyncClient):
+    _, headers = _fresh_headers()
+    start = date.today() - timedelta(days=2)
+    res = await async_client.post(
+        "/api/v1/onboarding/complete", headers=headers, json=_valid_payload(start)
+    )
+    assert res.status_code == 201
+    assert res.json()["period_end"] is None
+
+
+@pytest.mark.asyncio
+async def test_onboarding_rejects_inverted_dates(async_client: AsyncClient):
+    _, headers = _fresh_headers()
+    res = await async_client.post(
+        "/api/v1/onboarding/complete",
+        headers=headers,
+        json=_valid_payload(
+            date.today() - timedelta(days=2), date.today() - timedelta(days=5)
+        ),
+    )
+    assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_onboarding_rejects_malformed_cycle_value(async_client: AsyncClient):
+    _, headers = _fresh_headers()
+    res = await async_client.post(
+        "/api/v1/onboarding/complete",
+        headers=headers,
+        json=_valid_payload(date.today() - timedelta(days=5), usual_cycle_days=99),
+    )
+    assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_onboarding_accepts_valid_cycle_value(async_client: AsyncClient):
+    _, headers = _fresh_headers()
+    res = await async_client.post(
+        "/api/v1/onboarding/complete",
+        headers=headers,
+        json=_valid_payload(date.today() - timedelta(days=5), usual_cycle_days=28),
+    )
+    assert res.status_code == 201
+    assert res.json()["profile"]["usual_cycle_days"] == 28
+
+
+@pytest.mark.asyncio
+async def test_onboarding_rejects_malformed_period_length(async_client: AsyncClient):
+    _, headers = _fresh_headers()
+    res = await async_client.post(
+        "/api/v1/onboarding/complete",
+        headers=headers,
+        json=_valid_payload(date.today() - timedelta(days=5), usual_period_days=99),
+    )
+    assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_onboarding_accepts_valid_period_length(async_client: AsyncClient):
+    _, headers = _fresh_headers()
+    res = await async_client.post(
+        "/api/v1/onboarding/complete",
+        headers=headers,
+        json=_valid_payload(date.today() - timedelta(days=5), usual_period_days=5),
+    )
+    assert res.status_code == 201
+    assert res.json()["profile"]["usual_period_days"] == 5
+
+
+@pytest.mark.asyncio
+async def test_onboarding_repeated_exact_same_safe(async_client: AsyncClient):
+    _, headers = _fresh_headers()
+    start = date(2026, 3, 1)
+    payload = _valid_payload(start, date(2026, 3, 5),
+                             usual_cycle_days=28, usual_period_days=5)
+    r1 = await async_client.post("/api/v1/onboarding/complete", headers=headers, json=payload)
+    assert r1.status_code == 201
+    r2 = await async_client.post("/api/v1/onboarding/complete", headers=headers, json=payload)
+    assert r2.status_code == 201
+    assert r1.json()["period_id"] == r2.json()["period_id"]
+
+
+@pytest.mark.asyncio
+async def test_onboarding_repeat_ongoing_clears_end(async_client: AsyncClient):
+    """Same-start repeat mirrors the stated period state: Ended -> Ongoing
+    (explicit null end) must clear a previously stored end date."""
+    _, headers = _fresh_headers()
+    start = date(2026, 4, 1)
+    r1 = await async_client.post(
+        "/api/v1/onboarding/complete", headers=headers,
+        json=_valid_payload(start, date(2026, 4, 5)),
+    )
+    assert r1.status_code == 201
+    assert r1.json()["period_end"] == "2026-04-05"
+    r2 = await async_client.post(
+        "/api/v1/onboarding/complete", headers=headers,
+        json=_valid_payload(start),
+    )
+    assert r2.status_code == 201
+    assert r2.json()["period_id"] == r1.json()["period_id"]
+    assert r2.json()["period_end"] is None
+
+
+@pytest.mark.asyncio
+async def test_onboarding_already_completed_rejected(async_client: AsyncClient):
+    _, headers = _fresh_headers()
+    r1 = await async_client.post(
+        "/api/v1/onboarding/complete", headers=headers,
+        json=_valid_payload(date(2026, 5, 1), date(2026, 5, 5)),
+    )
+    assert r1.status_code == 201
+    r2 = await async_client.post(
+        "/api/v1/onboarding/complete", headers=headers,
+        json=_valid_payload(date(2026, 6, 10), date(2026, 6, 14)),
+    )
+    assert r2.status_code == 409
+    assert "History" in r2.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_onboarding_already_completed_creates_no_cycle(
+    async_client: AsyncClient, db_session: AsyncSession
+):
+    from sqlalchemy import func, select
+    from app.models.cycle import Cycle
+
+    uid, headers = _fresh_headers()
+    r1 = await async_client.post(
+        "/api/v1/onboarding/complete", headers=headers,
+        json=_valid_payload(date(2026, 5, 1), date(2026, 5, 5)),
+    )
+    assert r1.status_code == 201
+    r2 = await async_client.post(
+        "/api/v1/onboarding/complete", headers=headers,
+        json=_valid_payload(date(2026, 6, 10), date(2026, 6, 14)),
+    )
+    assert r2.status_code == 409
+    count = await db_session.execute(
+        select(func.count()).select_from(Cycle).where(Cycle.user_id == uid)
+    )
+    assert count.scalar_one() == 1
+
+
+@pytest.mark.asyncio
+async def test_onboarding_omitted_usuals_do_not_erase(async_client: AsyncClient):
+    _, headers = _fresh_headers()
+    start = date(2026, 7, 1)
+    r1 = await async_client.post(
+        "/api/v1/onboarding/complete", headers=headers,
+        json=_valid_payload(start, date(2026, 7, 5),
+                             usual_cycle_days=30, usual_period_days=6),
+    )
+    assert r1.status_code == 201
+    # Same-start repeat omitting usual_* must keep stored values
+    # (_valid_payload omits usual_* unless passed: pure omission here).
+    payload = _valid_payload(start, date(2026, 7, 5))
+    assert "usual_cycle_days" not in payload
+    r2 = await async_client.post("/api/v1/onboarding/complete", headers=headers, json=payload)
+    assert r2.status_code == 201
+    assert r2.json()["profile"]["usual_cycle_days"] == 30
+    assert r2.json()["profile"]["usual_period_days"] == 6
+
+
+@pytest.mark.asyncio
+async def test_onboarding_user_isolation(
+    async_client: AsyncClient, other_user_auth_headers: dict
+):
+    # User A onboards; user B with a different start is unaffected and
+    # receives their own independent period (no cross-user 409/overlap).
+    _, headers_a = _fresh_headers()
+    ra = await async_client.post(
+        "/api/v1/onboarding/complete", headers=headers_a,
+        json=_valid_payload(date(2026, 8, 1), date(2026, 8, 5)),
+    )
+    assert ra.status_code == 201
+    rb = await async_client.post(
+        "/api/v1/onboarding/complete", headers=other_user_auth_headers,
+        json=_valid_payload(date(2026, 8, 1), date(2026, 8, 5)),
+    )
+    assert rb.status_code == 201
+    assert rb.json()["period_id"] != ra.json()["period_id"]
