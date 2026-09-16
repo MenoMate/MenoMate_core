@@ -51,14 +51,15 @@ async def recommend_therapy(
     if payload.pain_score is not None:
         pain = payload.pain_score
     else:
-        # Check today's logged pain (user-local calendar date).
+        # Check today's logged pain (user-local calendar date). A null pain
+        # means "not provided" and falls back to idle, exactly like no log.
         today = user_today(profile.timezone)
         stmt = select(DailyLog).where(
             DailyLog.user_id == current_user_id, DailyLog.log_date == today
         )
         res = await db.execute(stmt)
         today_log = res.scalar_one_or_none()
-        if today_log:
+        if today_log and today_log.pain is not None:
             pain = today_log.pain
 
     rec = calculate_therapy_recommendation(

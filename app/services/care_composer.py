@@ -74,19 +74,52 @@ def _str_list(values: Any, limit: int = 5) -> List[str]:
     return [str(v) for v in values[:limit]]
 
 
+def _symptom_entries(log: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Normalize one log's symptoms to [{type, severity|None}].
+
+    Accepts the ai_context dict shape and tolerates bare strings (older
+    crafted contexts) so severity is never lost and never invented.
+    """
+    entries = []
+    for s in (log.get("symptoms") or []):
+        if isinstance(s, dict):
+            symptom_type = str(s.get("type") or "")
+            severity = s.get("severity")
+        else:
+            symptom_type, severity = str(s), None
+        if symptom_type:
+            entries.append({"type": symptom_type, "severity": severity})
+    return entries
+
+
+def _rated_label(entry: Dict[str, Any]) -> str:
+    severity = entry.get("severity")
+    if isinstance(severity, bool):
+        return entry["type"]
+    if isinstance(severity, (int, float)):
+        return f"{entry['type']} (severity {int(severity)})"
+    return entry["type"]
+
+
 def _symptom_facts(context: Dict[str, Any]) -> Dict[str, Any]:
     logs = context.get("recent_logs", []) or []
     recent_symptoms: List[str] = []
+    severities: Dict[str, Any] = {}
     for log in logs:
-        for symptom in (log.get("symptoms") or []):
-            if symptom not in recent_symptoms:
-                recent_symptoms.append(str(symptom))
+        for entry in _symptom_entries(log):
+            if entry["type"] not in recent_symptoms:
+                recent_symptoms.append(entry["type"])
+            if entry["severity"] is not None:
+                prev = severities.get(entry["type"])
+                if prev is None or entry["severity"] > prev:
+                    severities[entry["type"]] = entry["severity"]
     return {
         "cycle_day": context.get("cycle_day"),
         "phase": context.get("phase"),
         "today_pain": _today_pain_from_logs(logs),
         "recent_pain_avg": context.get("recent_pain_avg"),
         "recent_symptoms": recent_symptoms[:5],
+        "symptom_severities": severities,
         "frequent_symptoms": _str_list(context.get("frequent_symptoms")),
         "logs_count": len(logs),
     }
@@ -177,15 +210,20 @@ def build_log_lookup_text(context: Dict[str, Any]) -> str:
         )
     parts = []
     for log in logs[:MAX_LOG_ROWS_QUOTED]:
-        bits = [f"pain {log.get('pain')}"]
+        bits = []
+        # Unset (None) pain is not an observation: never render "pain None".
+        if log.get("pain") is not None:
+            bits.append(f"pain {log.get('pain')}")
         if log.get("mood"):
             bits.append(f"mood {log.get('mood')}")
-        symptoms = _str_list(log.get("symptoms"))
+        symptoms = [_rated_label(e) for e in _symptom_entries(log)]
         if symptoms:
             bits.append(", ".join(symptoms))
         if log.get("flow"):
             bits.append(f"flow {log.get('flow')}")
-        parts.append(f"on {log.get('date')}: " + "; ".join(bits))
+        if log.get("discharge"):
+            bits.append(f"discharge {log.get('discharge')}")
+        parts.append(f"on {log.get('date')}: " + ("; ".join(bits) if bits else "no details logged"))
     return "Here's what you logged — " + ". ".join(parts) + "."
 
 
@@ -355,13 +393,18 @@ def render_deterministic_reply(composed: ComposedReply) -> str:
         return composed.base_text
 
     if composed.topic == SYMPTOM:
-        recent = _join_words(facts.get("recent_symptoms") or [])
+        recent = facts.get("recent_symptoms") or []
+        severities = facts.get("symptom_severities") or {}
+        rated = [
+            _rated_label({"type": t, "severity": severities.get(t)}) for t in recent
+        ]
+        recent_phrase = _join_words(rated)
         mentioned = _join_words(facts.get("mentioned") or [])
         pain = facts.get("today_pain")
         pain_line = f" Today's logged pain is {pain}." if pain is not None else ""
-        if recent:
+        if recent_phrase:
             return (
-                f"Your recent logs show {recent} (around {anchor}).{pain_line} "
+                f"Your recent logs show {recent_phrase} (around {anchor}).{pain_line} "
                 "Gentle warmth, light movement, or rest can help with cramp-like "
                 "discomfort. If pain feels unusually sharp or severe, consider "
                 "speaking with a healthcare professional."

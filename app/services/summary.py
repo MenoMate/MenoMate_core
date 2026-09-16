@@ -198,8 +198,11 @@ async def get_current_cycle_summary(
 
     recent_pain_avg = None
     if recent_logs:
-        pains = [log.pain for log in recent_logs]
-        recent_pain_avg = round(sum(pains) / len(pains), 1)
+        # Unset (None) pain is not an observation: mood-only days must not
+        # drag the average down. Explicit 0 stays a valid observation.
+        pains = [log.pain for log in recent_logs if log.pain is not None]
+        if pains:
+            recent_pain_avg = round(sum(pains) / len(pains), 1)
 
     symptom_counter: Counter = Counter()
     for log in recent_logs:
