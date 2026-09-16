@@ -37,16 +37,18 @@ async def test_care_deterministic_cycle_inquiry(async_client: AsyncClient, auth_
     assert data_no["is_ai_generated"] is False
     assert "disclaimer" in data_no
 
-    # Onboard with cycle
-    await async_client.post(
+    # Onboard with cycle (name is required by the onboarding contract §2.1)
+    onboard_res = await async_client.post(
         "/api/v1/onboarding/complete",
         headers=auth_headers,
         json={
+            "name": "Care User",
             "last_period_start": "2026-08-10",
             "last_period_end": "2026-08-15",
             "usual_cycle_days": 28,
         },
     )
+    assert onboard_res.status_code == 201
 
     res_with_data = await async_client.post(
         "/api/v1/care/interactions",
