@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import get_current_user
 from app.db.session import get_db
 from app.models.profile import Profile
-from app.schemas.profile import ProfileResponse, ProfileUpdate
+from app.schemas.profile import ProfileResponse, ProfileUpdate, validate_birth_pair
 from app.services.profile import get_or_create_profile
 from app.services.timezone import validate_timezone
 
@@ -57,6 +57,21 @@ async def update_profile(
                 status_code=getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422),
                 detail=str(exc),
             )
+    if "birth_year" in fields_set or "birth_month" in fields_set:
+        # Month/year precision: validate the resulting stored pair (payload
+        # values over stored values) so partial updates and explicit-null
+        # clearing stay consistent. The server never infers age.
+        new_year = payload.birth_year if "birth_year" in fields_set else profile.birth_year
+        new_month = payload.birth_month if "birth_month" in fields_set else profile.birth_month
+        try:
+            validate_birth_pair(new_year, new_month)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422),
+                detail=str(exc),
+            )
+        profile.birth_year = new_year
+        profile.birth_month = new_month
 
     await db.commit()
     await db.refresh(profile)
@@ -69,7 +84,7 @@ async def update_profile(
     summary="Delete user application profile and all associated data",
     description=(
         "Deletes the user profile record from PostgreSQL, cascading deletion across all associated "
-        "application records (cycles, daily logs, therapy sessions, devices). "
+        "application records (cycles, daily logs, therapy sessions, devices, health context). "
         "Note: This removes PostgreSQL application data only; complete Supabase Auth user deletion "
         "requires Supabase Admin/Service-Role API invocation."
     ),

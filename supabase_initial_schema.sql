@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     units VARCHAR(32) NOT NULL DEFAULT 'metric',
     sensitivity_index DOUBLE PRECISION NOT NULL DEFAULT 1.0 CHECK (sensitivity_index >= 0.5 AND sensitivity_index <= 1.5),
     timezone VARCHAR(64),
+    birth_year INTEGER CHECK (birth_year IS NULL OR (birth_year >= 1900 AND birth_year <= 2100)),
+    birth_month INTEGER CHECK (birth_month IS NULL OR (birth_month >= 1 AND birth_month <= 12)),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -119,7 +121,61 @@ CREATE INDEX IF NOT EXISTS idx_prediction_ledger_user ON public.prediction_ledge
 CREATE INDEX IF NOT EXISTS idx_prediction_ledger_user_predicted_at ON public.prediction_ledger(user_id, predicted_at);
 
 -- =============================================================================
--- 8. Row Level Security (defense-in-depth, default-deny)
+-- 8. V1 Health Context foundation (user-provided context only)
+-- All health values are explicitly user-provided context: stored and
+-- returned to the owning client, never interpreted (no diagnosis, no
+-- inference, no effect on prediction calculations).
+-- =============================================================================
+
+-- Singleton per-user health context (contraception, pregnancy/fertility
+-- selections, free-text "anything else MenoMate should know").
+CREATE TABLE IF NOT EXISTS public.health_contexts (
+    user_id UUID PRIMARY KEY REFERENCES public.profiles(user_id) ON DELETE CASCADE,
+    contraception_method VARCHAR(32),
+    contraception_note TEXT,
+    pregnancy_context VARCHAR(32),
+    health_notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- User-reported health conditions (context, NOT a MenoMate diagnosis).
+-- condition_code is a structured key from a small curated allowlist;
+-- code 'other' carries the user's own label in custom_label.
+CREATE TABLE IF NOT EXISTS public.health_conditions (
+    id SERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES public.profiles(user_id) ON DELETE CASCADE,
+    condition_code VARCHAR(64) NOT NULL,
+    custom_label VARCHAR(128),
+    note TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_health_conditions_user ON public.health_conditions(user_id);
+
+-- Backstop for the application-level duplicate check: one row per
+-- (user, curated code). 'other' rows carry custom_label and are excluded.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_health_condition_user_code
+    ON public.health_conditions(user_id, condition_code)
+    WHERE custom_label IS NULL;
+
+-- User-provided medications / treatments (context only).
+CREATE TABLE IF NOT EXISTS public.medications (
+    id SERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES public.profiles(user_id) ON DELETE CASCADE,
+    name VARCHAR(128) NOT NULL,
+    note TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_medications_user ON public.medications(user_id);
+
+-- =============================================================================
+-- 9. Row Level Security (defense-in-depth, default-deny)
 -- =============================================================================
 -- The FastAPI backend connects with a single privileged database role
 -- (postgres/service_role, which bypasses RLS) and enforces per-user
@@ -144,3 +200,6 @@ ALTER TABLE public.symptom_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.devices ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.therapy_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.prediction_ledger ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.health_contexts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.health_conditions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.medications ENABLE ROW LEVEL SECURITY;
