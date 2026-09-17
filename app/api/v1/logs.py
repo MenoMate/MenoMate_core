@@ -19,6 +19,7 @@ from app.schemas.daily_log import (
     DailyLogUpdate,
     SymptomItem,
     SymptomMeta,
+    encode_moods,
 )
 from app.services.profile import get_or_create_profile
 from app.services.timezone import user_today_for
@@ -129,7 +130,7 @@ async def upsert_daily_log(
             user_id=current_user_id,
             log_date=log_date,
             pain=payload.pain,
-            mood=payload.mood.value if payload.mood else None,
+            mood=encode_moods(payload.mood),
             discharge=payload.discharge.value if payload.discharge else None,
             flow=payload.flow.value if payload.flow else None,
             notes=payload.notes,
@@ -138,7 +139,7 @@ async def upsert_daily_log(
         db.add(daily_log)
     else:
         daily_log.pain = payload.pain
-        daily_log.mood = payload.mood.value if payload.mood else None
+        daily_log.mood = encode_moods(payload.mood)
         daily_log.discharge = payload.discharge.value if payload.discharge else None
         daily_log.flow = payload.flow.value if payload.flow else None
         daily_log.notes = payload.notes
@@ -154,7 +155,7 @@ async def upsert_daily_log(
         existing = res.scalar_one_or_none()
         if existing:
             existing.pain = payload.pain
-            existing.mood = payload.mood.value if payload.mood else None
+            existing.mood = encode_moods(payload.mood)
             existing.discharge = payload.discharge.value if payload.discharge else None
             existing.flow = payload.flow.value if payload.flow else None
             existing.notes = payload.notes
@@ -197,7 +198,7 @@ async def update_daily_log(
     if "pain" in fields_set and payload.pain is not None:
         daily_log.pain = payload.pain
     if "mood" in fields_set:
-        daily_log.mood = payload.mood.value if payload.mood else None
+        daily_log.mood = encode_moods(payload.mood)
     if "discharge" in fields_set:
         daily_log.discharge = payload.discharge.value if payload.discharge else None
     if "flow" in fields_set:

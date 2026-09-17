@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS public.daily_logs (
     -- Nullable pain: NULL = not provided; 0 = explicitly logged no pain.
     -- The CHECK passes on NULL (unknown) by SQL semantics.
     pain INTEGER CHECK (pain >= 0 AND pain <= 10),
-    mood VARCHAR(32),
+    -- Multi-select moods as a JSON array string; NULL = none logged.
+    mood TEXT,
     discharge VARCHAR(32),
     flow VARCHAR(32),
     notes TEXT,

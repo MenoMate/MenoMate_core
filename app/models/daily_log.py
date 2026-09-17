@@ -34,7 +34,10 @@ class DailyLog(Base):
     # value; 0 = user intentionally logged no pain. Historical rows keep
     # their stored 0 (never reinterpreted as missing).
     pain: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    mood: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    # Multi-select moods serialized as a JSON array string (e.g.
+    # '["happy", "calm"]'); NULL = none logged. Legacy bare strings
+    # ("happy") remain readable via the tolerant response parser.
+    mood: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     discharge: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     flow: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

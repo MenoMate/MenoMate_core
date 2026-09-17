@@ -241,7 +241,7 @@ async def test_log_lookup_reads_back_exact_values(
         json={
             "log_date": str(log_day),
             "pain": 5,
-            "mood": "tired",
+            "mood": ["tired"],
             "symptoms": [
                 {"symptom_type": "headache", "severity": 4},
                 {"symptom_type": "bloating", "severity": 3},
@@ -335,7 +335,7 @@ async def test_null_pain_never_rendered(async_client: AsyncClient, auth_headers:
     day = date.today() - timedelta(days=1)
     res = await async_client.post(
         "/api/v1/logs", headers=auth_headers,
-        json={"log_date": str(day), "mood": "calm",
+        json={"log_date": str(day), "mood": ["calm"],
               "symptoms": [{"symptom_type": "headache", "severity": 2}]},
     )
     assert res.status_code in (200, 201)

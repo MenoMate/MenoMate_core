@@ -23,8 +23,8 @@ async def test_create_and_upsert_daily_log_with_symptoms(async_client: AsyncClie
     payload = {
         "log_date": today,
         "pain": 6,
-        "mood": "anxious",
-        "discharge": "moderate",
+        "mood": ["anxious"],
+        "discharge": "creamy",
         "flow": "medium",
         "notes": "Afternoon cramps",
         "symptoms": [
@@ -38,8 +38,8 @@ async def test_create_and_upsert_daily_log_with_symptoms(async_client: AsyncClie
     assert res.status_code == 200
     data = res.json()
     assert data["pain"] == 6
-    assert data["mood"] == "anxious"
-    assert data["discharge"] == "moderate"
+    assert data["mood"] == ["anxious"]
+    assert data["discharge"] == "creamy"
     assert len(data["symptoms"]) == 2
 
     # 2. Get log by date
@@ -76,12 +76,12 @@ async def test_patch_log_clear_optional_field(async_client: AsyncClient, auth_he
     create_res = await async_client.post(
         "/api/v1/logs",
         headers=auth_headers,
-        json={"log_date": today, "pain": 3, "mood": "calm", "notes": "Felt good today"},
+        json={"log_date": today, "pain": 3, "mood": ["calm"], "notes": "Felt good today"},
     )
     assert create_res.status_code == 200
     log_id = create_res.json()["id"]
     assert create_res.json()["notes"] == "Felt good today"
-    assert create_res.json()["mood"] == "calm"
+    assert create_res.json()["mood"] == ["calm"]
 
     # Explicitly clear notes and mood by supplying null
     patch_res = await async_client.patch(
@@ -233,9 +233,9 @@ async def test_symptom_severity_and_discharge_round_trip(
         json={
             "log_date": str(day),
             "pain": 6,
-            "mood": "tired",
+            "mood": ["tired"],
             "flow": "light",
-            "discharge": "light",
+            "discharge": "creamy",
             "symptoms": [
                 {"symptom_type": "cramps", "severity": 6},
                 {"symptom_type": "headache", "severity": 3},
@@ -244,15 +244,16 @@ async def test_symptom_severity_and_discharge_round_trip(
     )
     assert res.status_code in (200, 201), res.text
     body = res.json()
-    assert body["discharge"] == "light"
+    assert body["discharge"] == "creamy"
     assert {s["symptom_type"]: s["severity"] for s in body["symptoms"]} == {
         "cramps": 6, "headache": 3,
     }
+    assert body["mood"] == ["tired"]
 
     fetched = await async_client.get(f"/api/v1/logs/{day}", headers=auth_headers)
     assert fetched.status_code == 200
     assert fetched.json()["symptoms"] == body["symptoms"]
-    assert fetched.json()["discharge"] == "light"
+    assert fetched.json()["discharge"] == "creamy"
 
 
 @pytest.mark.asyncio
@@ -262,14 +263,14 @@ async def test_pain_null_vs_zero_semantics(async_client: AsyncClient, auth_heade
 
     omitted = await async_client.post(
         "/api/v1/logs", headers=auth_headers,
-        json={"log_date": str(d_null), "mood": "calm"},
+        json={"log_date": str(d_null), "mood": ["calm"]},
     )
     assert omitted.status_code in (200, 201)
     assert omitted.json()["pain"] is None
 
     explicit = await async_client.post(
         "/api/v1/logs", headers=auth_headers,
-        json={"log_date": str(d_zero), "pain": 0, "mood": "calm"},
+        json={"log_date": str(d_zero), "pain": 0, "mood": ["calm"]},
     )
     assert explicit.status_code in (200, 201)
     assert explicit.json()["pain"] == 0
@@ -299,7 +300,7 @@ async def test_recent_pain_avg_excludes_unset(
     )
     await async_client.post(
         "/api/v1/logs", headers=auth_headers,
-        json={"log_date": str(date.today() - timedelta(days=3)), "mood": "calm"},
+        json={"log_date": str(date.today() - timedelta(days=3)), "mood": ["calm"]},
     )
     await async_client.post(
         "/api/v1/logs", headers=auth_headers,
@@ -316,3 +317,88 @@ async def test_recent_pain_avg_excludes_unset(
         await db_session.execute(select(DailyLog).where(DailyLog.user_id == TEST_USER_ID))
     ).scalars().all()
     assert {r.pain for r in rows} == {None, 6, 0}
+
+
+# ---------------------------------------------------------------------------
+# Multi-select mood + qualitative discharge vocabulary.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_mood_multi_round_trip(async_client: AsyncClient, auth_headers: dict):
+    day = date.today() - timedelta(days=1)
+    res = await async_client.post(
+        "/api/v1/logs", headers=auth_headers,
+        json={"log_date": str(day), "mood": ["happy", "calm", "happy"]},
+    )
+    assert res.status_code in (200, 201), res.text
+    # Duplicates collapse, order preserved.
+    assert res.json()["mood"] == ["happy", "calm"]
+
+    fetched = await async_client.get(f"/api/v1/logs/{day}", headers=auth_headers)
+    assert fetched.json()["mood"] == ["happy", "calm"]
+
+
+@pytest.mark.asyncio
+async def test_mood_empty_list_means_unset(async_client: AsyncClient, auth_headers: dict):
+    day = date.today() - timedelta(days=1)
+    res = await async_client.post(
+        "/api/v1/logs", headers=auth_headers,
+        json={"log_date": str(day), "mood": []},
+    )
+    assert res.status_code in (200, 201)
+    assert res.json()["mood"] is None
+
+
+@pytest.mark.asyncio
+async def test_mood_invalid_item_rejected(async_client: AsyncClient, auth_headers: dict):
+    res = await async_client.post(
+        "/api/v1/logs", headers=auth_headers,
+        json={"log_date": str(date.today() - timedelta(days=1)), "mood": ["calm", "ecstatic_joy"]},
+    )
+    assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_discharge_vocabulary_accepted(async_client: AsyncClient, auth_headers: dict):
+    for i, value in enumerate(["sticky", "creamy", "watery", "slippery"]):
+        day = date.today() - timedelta(days=1 + i)
+        res = await async_client.post(
+            "/api/v1/logs", headers=auth_headers,
+            json={"log_date": str(day), "discharge": value},
+        )
+        assert res.status_code in (200, 201), (value, res.text)
+        assert res.json()["discharge"] == value
+
+
+@pytest.mark.asyncio
+async def test_discharge_legacy_values_rejected_on_write(
+    async_client: AsyncClient, auth_headers: dict
+):
+    for legacy in ["none", "light", "moderate", "heavy"]:
+        res = await async_client.post(
+            "/api/v1/logs", headers=auth_headers,
+            json={"log_date": str(date.today() - timedelta(days=1)), "discharge": legacy},
+        )
+        assert res.status_code == 422, legacy
+
+
+def test_decode_moods_tolerates_legacy_shapes():
+    from app.schemas.daily_log import decode_moods
+
+    assert decode_moods(None) is None
+    assert decode_moods('["happy", "calm"]') == ["happy", "calm"]
+    assert decode_moods("happy") == ["happy"]
+    assert decode_moods([]) is None
+    assert decode_moods("") is None
+
+
+@pytest.mark.asyncio
+async def test_flow_absent_means_unset(async_client: AsyncClient, auth_headers: dict):
+    day = date.today() - timedelta(days=1)
+    res = await async_client.post(
+        "/api/v1/logs", headers=auth_headers,
+        json={"log_date": str(day), "pain": 2},
+    )
+    assert res.status_code in (200, 201)
+    assert res.json()["flow"] is None
+    assert res.json()["discharge"] is None
