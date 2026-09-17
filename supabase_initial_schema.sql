@@ -117,3 +117,30 @@ CREATE TABLE IF NOT EXISTS public.prediction_ledger (
 
 CREATE INDEX IF NOT EXISTS idx_prediction_ledger_user ON public.prediction_ledger(user_id);
 CREATE INDEX IF NOT EXISTS idx_prediction_ledger_user_predicted_at ON public.prediction_ledger(user_id, predicted_at);
+
+-- =============================================================================
+-- 8. Row Level Security (defense-in-depth, default-deny)
+-- =============================================================================
+-- The FastAPI backend connects with a single privileged database role
+-- (postgres/service_role, which bypasses RLS) and enforces per-user
+-- isolation in application code: every query filters on the JWT `sub`.
+-- The backend never sets a per-request Postgres user context, so
+-- auth.uid() is NULL for backend traffic and per-user RLS policies CANNOT
+-- enforce isolation for API requests. Therefore:
+-- - Do NOT add USING (auth.uid() = user_id) policies: they would be dead
+--   code suggesting a guarantee that does not exist, and any permissive
+--   policy would open direct PostgREST access the architecture forbids
+--   (Flutter never touches the database; FastAPI is the only access layer).
+-- - Do NOT use FORCE ROW LEVEL SECURITY: it applies RLS even to table
+--   owners and would block the backend itself.
+-- Enabling RLS with NO permissive policies is intentional default-deny:
+-- direct access via the anon/authenticated roles (e.g. leaked anon key +
+-- PostgREST) is denied, while the backend's privileged connection is
+-- unaffected. Application-level checks remain the primary enforcement.
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cycles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.daily_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.symptom_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.devices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.therapy_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.prediction_ledger ENABLE ROW LEVEL SECURITY;

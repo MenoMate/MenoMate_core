@@ -163,7 +163,7 @@ By domain (request/response shapes live in `app/schemas/`; exact contracts in Sw
 
 ## Database
 
-Supabase PostgreSQL. Access model: FastAPI opens one async engine; **row-level security is NOT enabled** — isolation comes from every query filtering on the authenticated user id, with `ON DELETE CASCADE` from `profiles`. Tables: `profiles` (incl. IANA `timezone`), `cycles` (`DATE` ranges), `daily_logs` + `symptom_logs`, `devices`, `therapy_sessions` (`TIMESTAMPTZ`), `prediction_ledger`. Fresh DBs use `supabase_initial_schema.sql`; live DBs use `migrations/`. Tests run on in-memory sqlite via `Base.metadata.create_all`, so they never touch real infrastructure.
+Supabase PostgreSQL. Access model: FastAPI opens one async engine over a single privileged role (which bypasses RLS); **row-level security is enabled on all app tables as default-deny defense-in-depth with no permissive policies** — primary isolation comes from every query filtering on the authenticated user id, with `ON DELETE CASCADE` from `profiles`. Do not add `auth.uid()` policies or `FORCE ROW LEVEL SECURITY` without changing the connection architecture (see `supabase_initial_schema.sql` §8). Tables: `profiles` (incl. IANA `timezone`), `cycles` (`DATE` ranges), `daily_logs` + `symptom_logs`, `devices`, `therapy_sessions` (`TIMESTAMPTZ`), `prediction_ledger`. Fresh DBs use `supabase_initial_schema.sql`; live DBs use `migrations/`. Tests run on in-memory sqlite via `Base.metadata.create_all`, so they never touch real infrastructure.
 
 ## Safety architecture
 
