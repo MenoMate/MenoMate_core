@@ -9,6 +9,7 @@ from app.models.cycle import Cycle
 from app.models.daily_log import DailyLog
 from app.models.profile import Profile
 from app.models.therapy_session import TherapySession
+from app.schemas.daily_log import decode_moods
 from app.services.cycle_calculator import calculate_cycle_lengths
 from app.services.summary import get_current_cycle_summary
 from app.services.therapy_policy import calculate_therapy_recommendation
@@ -193,11 +194,20 @@ async def build_care_context(
         res = await db.execute(stmt)
         logs: List[DailyLog] = list(res.scalars().all())
 
+        def _mood_display(raw: object) -> Optional[str]:
+            # Stored mood is a JSON array string (or a legacy bare string):
+            # quote it back as a compact display value for prose.
+            moods = decode_moods(raw)
+            if not moods:
+                return None
+            return "/".join(moods)
+
         recent_logs = [
             {
                 "date": str(l.log_date),
                 "pain": l.pain,
-                "mood": l.mood,
+                "mood": _mood_display(l.mood),
+                "moods": decode_moods(l.mood) or [],
                 "discharge": l.discharge,
                 "flow": l.flow,
                 # Severity travels with each symptom so Care can quote

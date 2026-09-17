@@ -92,17 +92,23 @@ async def test_care_personalized_inquiry_mock_ai(async_client: AsyncClient, auth
 
 @pytest.mark.asyncio
 async def test_care_symptom_insight(async_client: AsyncClient, auth_headers: dict):
-    # 1. Log some daily symptoms first
-    await async_client.post(
+    # 1. Log some daily symptoms first (valid contract: mood list +
+    # symptom objects; severity travels to Care).
+    log_res = await async_client.post(
         "/api/v1/logs",
         headers=auth_headers,
         json={
             "log_date": "2026-08-16",
             "pain": 5,
-            "mood": "fatigued",
-            "symptoms": ["headache", "bloating", "cramps"],
+            "mood": ["tired"],
+            "symptoms": [
+                {"symptom_type": "headache", "severity": 4},
+                {"symptom_type": "bloating", "severity": 3},
+                {"symptom_type": "cramps", "severity": 5},
+            ],
         },
     )
+    assert log_res.status_code in (200, 201)
 
     # 2. Query care with canonical intent="symptom_insight"
     res = await async_client.post(
