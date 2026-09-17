@@ -63,14 +63,16 @@ async def get_current_user(
 
     try:
         if alg in ("RS256", "ES256"):
-            # Asymmetric signing via Supabase JWKS public key
+            # Asymmetric signing via Supabase JWKS public key.
+            # Key-retrieval failures return a generic 401: internal JWKS
+            # errors (network/host details) must not leak to callers.
             try:
                 jwks_client = get_jwks_client()
                 signing_key = jwks_client.get_signing_key_from_jwt(token).key
-            except Exception as e:
+            except Exception:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail=f"Failed to retrieve verification key: {str(e)}",
+                    detail="Could not validate credentials",
                     headers={"WWW-Authenticate": "Bearer"},
                 )
 
