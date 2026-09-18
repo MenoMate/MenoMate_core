@@ -29,11 +29,15 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS configuration
+    # CORS configuration. The only client is the Flutter mobile app over
+    # HTTPS (no browser/cookie flows), so credentials are only enabled for
+    # explicit origin lists. A wildcard origin must never be combined with
+    # allow_credentials (browsers reject it and it weakens the policy).
+    allow_credentials = "*" not in settings.ALLOWED_ORIGINS
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.ALLOWED_ORIGINS,
-        allow_credentials=True,
+        allow_credentials=allow_credentials,
         allow_methods=["*"],
         allow_headers=["*"],
     )

@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from app.models.cycle import Cycle
     from app.models.daily_log import DailyLog
     from app.models.device import Device
+    from app.models.health_context import HealthCondition, HealthContext, Medication
     from app.models.therapy_session import TherapySession
 
 
@@ -31,6 +32,11 @@ class Profile(Base):
     # (e.g. "Asia/Kolkata"). NULL only for legacy users until the device
     # persists it; see app.services.timezone. Never an offset/abbreviation.
     timezone: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # Optional date of birth at month/year precision only. Both columns are
+    # always set or cleared together (enforced in the profile route); the
+    # server never infers age from incomplete information.
+    birth_year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    birth_month: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     sensitivity_index: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -56,4 +62,13 @@ class Profile(Base):
     )
     therapy_sessions: Mapped[List["TherapySession"]] = relationship(
         "TherapySession", back_populates="user", cascade="all, delete-orphan"
+    )
+    health_context: Mapped[Optional["HealthContext"]] = relationship(
+        "HealthContext", back_populates="user", cascade="all, delete-orphan", uselist=False
+    )
+    health_conditions: Mapped[List["HealthCondition"]] = relationship(
+        "HealthCondition", back_populates="user", cascade="all, delete-orphan"
+    )
+    medications: Mapped[List["Medication"]] = relationship(
+        "Medication", back_populates="user", cascade="all, delete-orphan"
     )

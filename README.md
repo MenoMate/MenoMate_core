@@ -72,7 +72,7 @@ MenoMate_core/
 - Devices: register / list / unpair BLE hardware identifiers.
 - User-local calendar semantics via stored IANA timezone (see below).
 
-**Planned / not built:** managed cloud deployment, local-notification scheduling (blocked on nothing — needs product decision), deeper daily-log personalization, hardware integration and validation, multi-year variability modeling.
+**Planned / not built:** local-notification scheduling (blocked on nothing — needs product decision), deeper daily-log personalization, hardware integration and validation, multi-year variability modeling. Managed cloud deployment has a minimal Render blueprint (`render.yaml`, manual launch only — nothing is auto-deployed from this repo).
 
 **Experimental (evaluated offline, NOT served):** hierarchical/Bayesian and skip-aware candidate predictors were backtested against the production predictor; result was insufficient evidence to change anything, so production still serves the robust WMA only. Experiment code lives outside serving paths.
 
@@ -109,8 +109,8 @@ Names only (see `.env.example` for placeholders). All server-only; never commit 
 | `SUPABASE_URL` | Yes | Also feeds JWKS discovery + issuer check; rejects placeholders at startup |
 | `SUPABASE_JWT_SECRET` | Optional | Only for legacy HS256; omit with asymmetric signing |
 | `SUPABASE_JWKS_URL` | No | Override JWKS endpoint; derived from `SUPABASE_URL` by default |
-| `ALLOWED_ORIGINS` | No | CORS list or `*` (default `*`) |
-| `AUTO_CREATE_TABLES` | No | DDL on startup; default `false` (use the SQL files instead) |
+| `ALLOWED_ORIGINS` | No | CORS list or `*` (default `*` for local dev). A wildcard origin never enables credentials; production should use an explicit list (or empty — the Flutter app needs no browser CORS) |
+| `AUTO_CREATE_TABLES` | No | DDL on startup; default `false`. Production must keep `false` and use the SQL files instead |
 | `GROQ_API_KEY` | No | Care LLM; unset → deterministic mock provider |
 | `GROQ_MODEL` | No | Default `openai/gpt-oss-120b` |
 
@@ -133,12 +133,26 @@ pytest -q
 
 Docs + health: `http://localhost:8000/docs` (Swagger UI), `.../redoc`, `.../health`. Mobile-on-USB: `adb reverse tcp:8000 tcp:8000`.
 
+## Render deployment (manual)
+
+Production startup (Render runs this; the app itself never assumes port 8000):
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port $PORT
+```
+
+- Binds `0.0.0.0` and respects Render's `$PORT`.
+- Health check path: `/health` (no authentication, returns `{"status": "healthy", ...}`).
+- `render.yaml` holds this configuration as a blueprint with `autoDeploy: false`. Launch it manually in the Render dashboard and set the secret env vars there (`DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_JWT_SECRET` for legacy HS256 or `SUPABASE_JWKS_URL` override, `GROQ_API_KEY`). Non-secret defaults shipped in the blueprint: `ALLOWED_ORIGINS=""` (restrictive — mobile needs no browser CORS), `AUTO_CREATE_TABLES="false"`, `GROQ_MODEL=openai/gpt-oss-120b`.
+- Database: Supabase PostgreSQL. For a fresh project execute `supabase_initial_schema.sql` in the Supabase SQL editor; for an existing database apply `migrations/` in filename order. Never enable `AUTO_CREATE_TABLES` in production.
+
 ## API
 
 By domain (request/response shapes live in `app/schemas/`; exact contracts in Swagger at `/docs`):
 
 - Auth: `GET /api/v1/auth/me`
-- Profile: `GET` / `PATCH` / `DELETE /api/v1/profile` (PATCH accepts IANA `timezone`)
+- Profile: `GET` / `PATCH` / `DELETE /api/v1/profile` (PATCH accepts IANA `timezone`, optional `birth_year` + `birth_month` month/year precision)
+- Health context (V1, user-provided context only — never alters predictions): `GET` / `PUT` / `PATCH /api/v1/health-context` (contraception, pregnancy/fertility selections, free-text notes), `GET` / `POST /api/v1/health-context/conditions`, `PATCH` / `DELETE /api/v1/health-context/conditions/{id}`, `GET` / `POST /api/v1/health-context/medications`, `PATCH` / `DELETE /api/v1/health-context/medications/{id}`
 - Onboarding: `POST /api/v1/onboarding/complete` (atomic profile + first period)
 - Cycles: `GET /api/v1/cycles/current`, `POST /api/v1/cycles/current/end`, `GET` / `POST /api/v1/cycles`, `PATCH /api/v1/cycles/{id}`
 - Logs: `GET /api/v1/symptoms` (public), `GET /api/v1/logs/{date}`, `GET /api/v1/logs`, `POST /api/v1/logs` (upsert), `PATCH /api/v1/logs/{id}`
@@ -150,7 +164,7 @@ By domain (request/response shapes live in `app/schemas/`; exact contracts in Sw
 
 ## Database
 
-Supabase PostgreSQL. Access model: FastAPI opens one async engine; **row-level security is NOT enabled** — isolation comes from every query filtering on the authenticated user id, with `ON DELETE CASCADE` from `profiles`. Tables: `profiles` (incl. IANA `timezone`), `cycles` (`DATE` ranges), `daily_logs` + `symptom_logs`, `devices`, `therapy_sessions` (`TIMESTAMPTZ`), `prediction_ledger`. Fresh DBs use `supabase_initial_schema.sql`; live DBs use `migrations/`. Tests run on in-memory sqlite via `Base.metadata.create_all`, so they never touch real infrastructure.
+Supabase PostgreSQL. Access model: FastAPI opens one async engine over a single privileged role (which bypasses RLS); **row-level security is enabled on all app tables as default-deny defense-in-depth with no permissive policies** — primary isolation comes from every query filtering on the authenticated user id, with `ON DELETE CASCADE` from `profiles`. Do not add `auth.uid()` policies or `FORCE ROW LEVEL SECURITY` without changing the connection architecture (see `supabase_initial_schema.sql` §9). Tables: `profiles` (incl. IANA `timezone`, optional `birth_year`/`birth_month`), `cycles` (`DATE` ranges), `daily_logs` + `symptom_logs`, `devices`, `therapy_sessions` (`TIMESTAMPTZ`), `prediction_ledger`, `health_contexts` (singleton contraception/pregnancy/free-text context), `health_conditions`, `medications`. Fresh DBs use `supabase_initial_schema.sql`; live DBs use `migrations/`. Tests run on in-memory sqlite via `Base.metadata.create_all`, so they never touch real infrastructure.
 
 ## Safety architecture
 
@@ -170,7 +184,7 @@ Never present hardware safety as validated: there is no hardware test evidence i
 pytest -q
 ```
 
-Suite status (2026-09-13 snapshot): 151 collected, 148 passing, 3 known pre-existing failures, all in duplicate-start upsert expectations (`test_api_contract_409…`, `test_cycle_overlapping…`, `test_cycle_duplicate…`) — documented, unrelated to active work. Organization: `test_auth.py` (JWT matrix), `test_api_contract.py`, `test_cycles/logs/onboarding/summary` (routes + validation), `test_cycle_calculator.py` (math vectors, explicit `today`), `test_backtest.py` (walk-forward harness equivalence), `test_prediction_ledger.py`, `test_timezone.py` (frozen-clock ahead/behind UTC proofs, midnight boundaries, fallback), `test_care.py`, `test_therapy_and_devices.py`. New date logic must add frozen-clock tests, never depend on the machine timezone. (On locked-down Windows checkouts where `.pytest_cache` is read-only, add `-p no:cacheprovider`.)
+Suite status (2026-09-17 snapshot): 162 collected, 159 passing, 3 known pre-existing failures, all in duplicate-start upsert expectations (`test_api_contract_409…`, `test_cycle_overlapping…`, `test_cycle_duplicate…`) — documented, unrelated to active work. The implementation intentionally upserts a same-user duplicate start (returns 201); the tests expect 409/400. Behavior was left unchanged for backward compatibility. Organization: `test_auth.py` (JWT matrix), `test_api_contract.py`, `test_cycles/logs/onboarding/summary` (routes + validation), `test_cycle_calculator.py` (math vectors, explicit `today`), `test_backtest.py` (walk-forward harness equivalence), `test_prediction_ledger.py`, `test_timezone.py` (frozen-clock ahead/behind UTC proofs, midnight boundaries, fallback), `test_care.py`, `test_therapy_and_devices.py`. New date logic must add frozen-clock tests, never depend on the machine timezone. (On locked-down Windows checkouts where `.pytest_cache` is read-only, add `-p no:cacheprovider`.)
 
 ## Development rules
 

@@ -5,6 +5,7 @@ from app.models.symptom_log import SymptomLog
 from app.models.device import Device
 from app.models.therapy_session import TherapySession
 from app.models.prediction_ledger import PredictionLedger
+from app.models.health_context import HealthCondition, HealthContext, Medication
 
 __all__ = [
     "Profile",
@@ -14,4 +15,7 @@ __all__ = [
     "Device",
     "TherapySession",
     "PredictionLedger",
+    "HealthCondition",
+    "HealthContext",
+    "Medication",
 ]

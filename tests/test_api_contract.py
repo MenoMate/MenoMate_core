@@ -36,12 +36,17 @@ async def test_api_contract_all_routes_registered(async_client: AsyncClient):
         "/api/v1/therapy/sessions": ["get", "post"],
         "/api/v1/therapy/sessions/{session_id}": ["patch"],
         "/api/v1/care/interactions": ["post"],
+        "/api/v1/health-context": ["get", "put", "patch"],
+        "/api/v1/health-context/conditions": ["get", "post"],
+        "/api/v1/health-context/conditions/{condition_id}": ["patch", "delete"],
+        "/api/v1/health-context/medications": ["get", "post"],
+        "/api/v1/health-context/medications/{medication_id}": ["patch", "delete"],
     }
 
     # Validate exact route and operation counts
-    assert len(expected_endpoints) == 18, f"Expected 18 unique API v1 paths, found {len(expected_endpoints)}"
+    assert len(expected_endpoints) == 23, f"Expected 23 unique API v1 paths, found {len(expected_endpoints)}"
     total_ops = sum(len(methods) for methods in expected_endpoints.values())
-    assert total_ops == 24, f"Expected 24 total API v1 operations, found {total_ops}"
+    assert total_ops == 35, f"Expected 35 total API v1 operations, found {total_ops}"
 
     for path, methods in expected_endpoints.items():
         assert path in paths, f"Endpoint {path} missing from API contract"
@@ -78,6 +83,17 @@ async def test_api_contract_401_on_all_protected_routes(async_client: AsyncClien
         ("POST", "/api/v1/therapy/sessions", {"started_at": "2026-08-01T10:00:00Z"}),
         ("PATCH", "/api/v1/therapy/sessions/1", {"pain_after": 2}),
         ("POST", "/api/v1/care/interactions", {"user_message": "hello"}),
+        ("GET", "/api/v1/health-context", None),
+        ("PUT", "/api/v1/health-context", {"pregnancy_context": "avoiding_pregnancy"}),
+        ("PATCH", "/api/v1/health-context", {"health_notes": "hello"}),
+        ("GET", "/api/v1/health-context/conditions", None),
+        ("POST", "/api/v1/health-context/conditions", {"condition_code": "migraine"}),
+        ("PATCH", "/api/v1/health-context/conditions/1", {"note": "x"}),
+        ("DELETE", "/api/v1/health-context/conditions/1", None),
+        ("GET", "/api/v1/health-context/medications", None),
+        ("POST", "/api/v1/health-context/medications", {"name": "Iron"}),
+        ("PATCH", "/api/v1/health-context/medications/1", {"note": "x"}),
+        ("DELETE", "/api/v1/health-context/medications/1", None),
     ]
 
     for method, path, body in protected_calls:
@@ -85,6 +101,8 @@ async def test_api_contract_401_on_all_protected_routes(async_client: AsyncClien
             res = await async_client.get(path)
         elif method == "POST":
             res = await async_client.post(path, json=body or {})
+        elif method == "PUT":
+            res = await async_client.put(path, json=body or {})
         elif method == "PATCH":
             res = await async_client.patch(path, json=body or {})
         elif method == "DELETE":
