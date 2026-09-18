@@ -175,7 +175,109 @@ CREATE TABLE IF NOT EXISTS public.medications (
 CREATE INDEX IF NOT EXISTS idx_medications_user ON public.medications(user_id);
 
 -- =============================================================================
--- 9. Row Level Security (defense-in-depth, default-deny)
+-- 10. Phase 2 fertility observations (OBSERVED user-measured facts)
+-- Grain: one row per (user, local calendar date, observation type).
+-- observation_date is a USER-LOCAL calendar DATE (never shifted through UTC).
+-- Deliberately separate from daily_logs.discharge (generic volume scale) and
+-- from symptom_logs (fixed taxonomy). Carries no confidence/method/window
+-- (those belong to server-computed estimates). An LH row records the test
+-- result only and never claims ovulation occurred.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS public.fertility_observations (
+    id SERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES public.profiles(user_id) ON DELETE CASCADE,
+    observation_date DATE NOT NULL,
+    observation_type VARCHAR(32) NOT NULL,
+    lh_result VARCHAR(16),
+    bbt_celsius NUMERIC(4, 2),
+    mucus_category VARCHAR(32),
+    recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    source VARCHAR(32) NOT NULL DEFAULT 'manual',
+    note TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT ck_fertility_obs_type
+        CHECK (observation_type IN ('lh_test', 'bbt', 'cervical_mucus')),
+    CONSTRAINT ck_fertility_obs_value_matches_type
+        CHECK (
+            (observation_type = 'lh_test' AND lh_result IS NOT NULL
+                AND bbt_celsius IS NULL AND mucus_category IS NULL)
+            OR (observation_type = 'bbt' AND bbt_celsius IS NOT NULL
+                AND lh_result IS NULL AND mucus_category IS NULL)
+            OR (observation_type = 'cervical_mucus' AND mucus_category IS NOT NULL
+                AND lh_result IS NULL AND bbt_celsius IS NULL)
+        ),
+    CONSTRAINT ck_fertility_obs_lh
+        CHECK (lh_result IS NULL OR lh_result IN ('positive', 'negative', 'invalid')),
+    CONSTRAINT ck_fertility_obs_bbt_range
+        CHECK (bbt_celsius IS NULL OR (bbt_celsius >= 35.00 AND bbt_celsius <= 42.00)),
+    CONSTRAINT ck_fertility_obs_mucus
+        CHECK (mucus_category IS NULL OR mucus_category IN
+            ('dry', 'sticky', 'creamy', 'watery', 'egg_white')),
+    CONSTRAINT ck_fertility_obs_source
+        CHECK (source IN ('manual', 'imported')),
+    CONSTRAINT uq_fertility_obs_user_date_type
+        UNIQUE (user_id, observation_date, observation_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_fertility_obs_user ON public.fertility_observations(user_id);
+CREATE INDEX IF NOT EXISTS idx_fertility_obs_user_date ON public.fertility_observations(user_id, observation_date);
+
+-- =============================================================================
+-- Phase 3 explicit pregnancy mode + pregnancy dating (NEW behavioral state)
+-- Singleton per user that has ever entered pregnancy mode (absence = never
+-- entered). Distinct from health_contexts.pregnancy_context (free selection,
+-- zero behavioral effect, never reinterpreted). is_active = FALSE retains
+-- history with mode off; DELETE erases. dating_source: lmp | ultrasound |
+-- clinician | unknown (precedence clinician > ultrasound > lmp > unknown).
+-- EDDs are stored verbatim; the server never auto-computes them.
+-- DATEs are user-local calendar dates (never shifted); instants are UTC.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS public.pregnancy_contexts (
+    user_id UUID PRIMARY KEY REFERENCES public.profiles(user_id) ON DELETE CASCADE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    dating_source VARCHAR(32),
+    estimated_due_date DATE,
+    lmp_date DATE,
+    confirmation_date DATE,
+    dating_note TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT ck_pregnancy_dating_source
+        CHECK (dating_source IS NULL OR dating_source IN
+            ('lmp', 'ultrasound', 'clinician', 'unknown')),
+    CONSTRAINT ck_pregnancy_edd_requires_known_source
+        CHECK ((estimated_due_date IS NULL) OR
+            (dating_source IN ('lmp', 'ultrasound', 'clinician'))),
+    CONSTRAINT ck_pregnancy_lmp_only_for_lmp_source
+        CHECK ((lmp_date IS NULL) OR (dating_source = 'lmp')),
+    CONSTRAINT ck_pregnancy_lmp_before_edd
+        CHECK ((lmp_date IS NULL OR estimated_due_date IS NULL
+            OR lmp_date <= estimated_due_date)),
+    CONSTRAINT ck_pregnancy_confirmation_before_edd
+        CHECK ((confirmation_date IS NULL OR estimated_due_date IS NULL
+            OR confirmation_date <= estimated_due_date))
+);
+
+-- =============================================================================
+-- Phase 4 explicit reproductive-aging context (user-owned notes only)
+-- Singleton per user that has ever recorded reproductive-aging context
+-- (absence or NULL notes = no recorded context). Per the Phase 1 design
+-- contract (§4.3, §11): NO staging enum, NO diagnosis column, NO date
+-- fields, NO detection state — verbatim user notes only (mirroring the
+-- health-notes pattern), never parsed, never altering period predictions,
+-- fertility estimates, or pregnancy mode. Independent of the pregnancy
+-- singleton; both may coexist and neither flips the other.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS public.reproductive_aging_contexts (
+    user_id UUID PRIMARY KEY REFERENCES public.profiles(user_id) ON DELETE CASCADE,
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- =============================================================================
+-- 11. Row Level Security (defense-in-depth, default-deny)
 -- =============================================================================
 -- The FastAPI backend connects with a single privileged database role
 -- (postgres/service_role, which bypasses RLS) and enforces per-user
@@ -203,3 +305,6 @@ ALTER TABLE public.prediction_ledger ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.health_contexts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.health_conditions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.medications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.fertility_observations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.pregnancy_contexts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.reproductive_aging_contexts ENABLE ROW LEVEL SECURITY;
