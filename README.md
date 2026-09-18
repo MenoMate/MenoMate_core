@@ -38,7 +38,8 @@ Boundaries that must stay intact:
 MenoMate_core/
 ├── app/
 │   ├── api/v1/            # Route handlers: auth, profile, onboarding,
-│   │                      # cycles, logs, summary, devices, therapy, care
+│   │                      # cycles, logs, summary, devices, therapy, care,
+│   │                      # health_context
 │   ├── core/              # config.py (env), security.py (JWT verification)
 │   ├── db/                # base.py (Base), session.py (async engine)
 │   ├── models/            # SQLAlchemy ORM tables (source of truth for columns)
@@ -159,7 +160,7 @@ By domain (request/response shapes live in `app/schemas/`; exact contracts in Sw
 - Summaries: `GET /api/v1/summary/current`, `GET /api/v1/summary/history`
 - Devices: `GET` / `POST /api/v1/devices`, `DELETE /api/v1/devices/{id}`
 - Therapy: `POST /api/v1/therapy/recommend`, `GET` / `POST /api/v1/therapy/sessions`, `PATCH /api/v1/therapy/sessions/{id}`
-- Care: `POST /api/v1/care/interactions` (+ `/interact` alias)
+ - Care: `POST /api/v1/care/interactions`
 - Root: `GET /`, `GET /health`
 
 ## Database
@@ -184,7 +185,7 @@ Never present hardware safety as validated: there is no hardware test evidence i
 pytest -q
 ```
 
-Suite status (2026-09-17 snapshot): 162 collected, 159 passing, 3 known pre-existing failures, all in duplicate-start upsert expectations (`test_api_contract_409…`, `test_cycle_overlapping…`, `test_cycle_duplicate…`) — documented, unrelated to active work. The implementation intentionally upserts a same-user duplicate start (returns 201); the tests expect 409/400. Behavior was left unchanged for backward compatibility. Organization: `test_auth.py` (JWT matrix), `test_api_contract.py`, `test_cycles/logs/onboarding/summary` (routes + validation), `test_cycle_calculator.py` (math vectors, explicit `today`), `test_backtest.py` (walk-forward harness equivalence), `test_prediction_ledger.py`, `test_timezone.py` (frozen-clock ahead/behind UTC proofs, midnight boundaries, fallback), `test_care.py`, `test_therapy_and_devices.py`. New date logic must add frozen-clock tests, never depend on the machine timezone. (On locked-down Windows checkouts where `.pytest_cache` is read-only, add `-p no:cacheprovider`.)
+Suite status (2026-09-18 snapshot): 278 collected, 275 passing, 3 known pre-existing failures, all in duplicate-start upsert expectations (`test_api_contract_409…`, `test_cycle_overlapping…`, `test_cycle_duplicate…`) — documented, unrelated to active work. The implementation intentionally upserts a same-user duplicate start (returns 201); the tests expect 409/400. Behavior was left unchanged for backward compatibility. Organization: `test_auth.py` (JWT matrix), `test_api_contract.py`, `test_cycles/logs/onboarding/summary` (routes + validation), `test_cycle_calculator.py` (math vectors, explicit `today`), `test_backtest.py` (walk-forward harness equivalence), `test_prediction_ledger.py`, `test_timezone.py` (frozen-clock ahead/behind UTC proofs, midnight boundaries, fallback), `test_care*.py` (routing, composer, mock, safety, actions, therapy, session), `test_health_context.py`, `test_production_hardening.py`, `test_therapy_and_devices.py`. New date logic must add frozen-clock tests, never depend on the machine timezone. (On locked-down Windows checkouts where `.pytest_cache` is read-only, add `-p no:cacheprovider`.)
 
 ## Development rules
 
