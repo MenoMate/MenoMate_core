@@ -38,7 +38,8 @@ Boundaries that must stay intact:
 MenoMate_core/
 ├── app/
 │   ├── api/v1/            # Route handlers: auth, profile, onboarding,
-│   │                      # cycles, logs, summary, devices, therapy, care
+│   │                      # cycles, logs, summary, devices, therapy, care,
+│   │                      # health_context
 │   ├── core/              # config.py (env), security.py (JWT verification)
 │   ├── db/                # base.py (Base), session.py (async engine)
 │   ├── models/            # SQLAlchemy ORM tables (source of truth for columns)
