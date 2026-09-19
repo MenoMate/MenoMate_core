@@ -10,6 +10,7 @@ from app.api.v1.devices import router as devices_router
 from app.api.v1.therapy import router as therapy_router
 from app.api.v1.care import router as care_router
 from app.api.v1.health_context import router as health_context_router
+from app.api.v1.reproductive import router as reproductive_router
 
 api_v1_router = APIRouter()
 
@@ -23,3 +24,4 @@ api_v1_router.include_router(devices_router)
 api_v1_router.include_router(therapy_router)
 api_v1_router.include_router(care_router)
 api_v1_router.include_router(health_context_router)
+api_v1_router.include_router(reproductive_router)

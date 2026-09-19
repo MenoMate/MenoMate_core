@@ -1,4 +1,8 @@
--- 0003: daily_logs.pain becomes nullable.
+-- 0008: daily_logs.pain becomes nullable.
+--
+-- Numbered after the already-applied 0005-0007 reproductive sequence to
+-- preserve deterministic filename ordering without rewriting production
+-- migration history.
 --
 -- Semantics: NULL = user did not provide a pain value; 0 = user
 -- intentionally logged no pain. Existing rows keep their stored values

@@ -11,8 +11,11 @@ if TYPE_CHECKING:
     from app.models.cycle import Cycle
     from app.models.daily_log import DailyLog
     from app.models.device import Device
+    from app.models.fertility_observation import FertilityObservation
     from app.models.health_context import HealthCondition, HealthContext, Medication
+    from app.models.pregnancy_context import PregnancyContext
     from app.models.therapy_session import TherapySession
+    from app.models.reproductive_aging import ReproductiveAgingContext
 
 
 class Profile(Base):
@@ -71,4 +74,16 @@ class Profile(Base):
     )
     medications: Mapped[List["Medication"]] = relationship(
         "Medication", back_populates="user", cascade="all, delete-orphan"
+    )
+    fertility_observations: Mapped[List["FertilityObservation"]] = relationship(
+        "FertilityObservation", back_populates="user", cascade="all, delete-orphan"
+    )
+    pregnancy_context: Mapped[Optional["PregnancyContext"]] = relationship(
+        "PregnancyContext", back_populates="user", cascade="all, delete-orphan", uselist=False
+    )
+    reproductive_aging_context: Mapped[Optional["ReproductiveAgingContext"]] = relationship(
+        "ReproductiveAgingContext",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        uselist=False,
     )
