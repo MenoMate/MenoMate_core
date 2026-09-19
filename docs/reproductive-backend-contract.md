@@ -1,5 +1,15 @@
-# MenoMate Reproductive-Health — Phase 1 Backend Contract (DESIGN ONLY)
+# MenoMate Reproductive-Health — Phase 1 Backend Contract (DESIGN ONLY, HISTORICAL)
 
+> Current-state note (2026-09-19, production `main` `0baa5e7`): this is the
+> historical Phase 1 design record. Phases 2–4 are **implemented, committed,
+> merged to `main`, and manually deployed** — not pending or experimental.
+> Current references are `../README.md`, `api-contract.md`, and
+> `database-and-migrations.md`; Swagger at `/docs` is authoritative.
+> Known deltas from this design snapshot: migrations now run `0002`–`0009`
+> (no `0001` file); fertility estimates ship compute-on-read with no
+> `fertility_estimates` table (Amendment A1 below, already in this file);
+> only `POST /api/v1/care/interactions` exists (no `/interact` alias was ever
+> implemented); suite is 373 collected / 373 passed. Body below preserved as written.
 > Status: **Phase 1 design document. No implementation.**
 > No fertility/ovulation algorithm, no pregnancy calculation, no perimenopause
 > logic, no migration, no config/database/deployment change was made in this

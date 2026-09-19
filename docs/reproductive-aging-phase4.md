@@ -1,5 +1,10 @@
 # MenoMate Reproductive-Aging — Phase 4 Backend Record (IMPLEMENTED)
 
+> Current-state note (2026-09-19, production `main` `0baa5e7`): Phase 4 is
+> **merged to `main` and manually deployed** — not worktree state, not pending
+> review. The verification paragraph (§7) below is the historical 2026-09-18
+> record (its "nothing committed", "3 pre-existing failures" lines are stale;
+> current suite is 373 collected / 373 passed). Body below preserved as written.
 > Status: **Phase 4 implementation record. Backend only.**
 > Implements the minimal reproductive-aging/perimenopause context foundation
 > defined by the Phase 1 design contract (`docs/reproductive-backend-contract.md`
@@ -145,3 +150,15 @@ test asserts its absence.
   status, infertility, zero pregnancy possibility, or clinical confirmation.
 - Production safety: no deploy, no Render change, no production DB/migration
   activity, no env change; nothing committed or pushed.
+
+## 8. Current-state addendum (2026-09-19, historical record above preserved)
+
+- The implementation above was merged to `main` via `0baa5e7` and manually
+  deployed to the Render production service — it is not worktree state and not
+  awaiting review.
+- The "3 pre-existing duplicate-start failures" line above is historical: those
+  stale expectations were corrected without changing the implementation, and the
+  current suite is 373 collected / 373 passed, 0 failed.
+- "Nothing committed or pushed" above describes the 2026-09-18 worktree moment
+  only; the code, migrations (`0007_reproductive_aging_context_v1.sql`), schema,
+  and `tests/test_reproductive_aging_phase4.py` (24 tests) are committed on `main`.
