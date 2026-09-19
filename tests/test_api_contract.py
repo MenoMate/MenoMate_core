@@ -208,15 +208,19 @@ async def test_api_contract_404_handling(async_client: AsyncClient, auth_headers
 @pytest.mark.asyncio
 async def test_api_contract_409_concurrency_and_duplicates(async_client: AsyncClient, auth_headers: dict, other_user_auth_headers: dict):
     """
-    Validates clean 409 Conflict responses for duplicate cycle start dates and cross-user device claims.
+    Contract: same-start cycle POSTs are a deterministic idempotent upsert
+    (201, same row) while cross-user device claims remain 409 Conflict.
     """
-    # 1. Duplicate period start for same user
+    # 1. Duplicate period start for same user -> deterministic upsert 201
     p_start = "2026-06-01"
     res1 = await async_client.post("/api/v1/cycles", headers=auth_headers, json={"period_start": p_start, "period_end": "2026-06-05"})
     assert res1.status_code == 201
+    first_id = res1.json()["id"]
 
     res2 = await async_client.post("/api/v1/cycles", headers=auth_headers, json={"period_start": p_start, "period_end": "2026-06-05"})
-    assert res2.status_code in (400, 409)
+    assert res2.status_code == 201
+    assert res2.json()["id"] == first_id
+    assert res2.json()["period_start"] == p_start
 
     # 2. Cross-user duplicate device registration conflict
     dev_id = f"DEV-CONTRACT-{uuid.uuid4().hex[:8]}"

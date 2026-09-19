@@ -46,8 +46,10 @@ async def test_cycle_overlapping_and_validation(async_client: AsyncClient, auth_
         json={"period_start": str(start_1), "period_end": str(end_1)},
     )
     assert res1.status_code == 201
+    base_id = res1.json()["id"]
 
-    # Overlapping period (18 days ago to 12 days ago)
+    # Overlapping period (18 days ago to 12 days ago) — genuinely invalid
+    # overlap with a *different* start must still be rejected.
     res_overlap = await async_client.post(
         "/api/v1/cycles",
         headers=auth_headers,
@@ -56,13 +58,22 @@ async def test_cycle_overlapping_and_validation(async_client: AsyncClient, auth_
     assert res_overlap.status_code == 400
     assert "overlaps with existing period" in res_overlap.json()["detail"]
 
-    # Duplicate start date
+    # Duplicate start date — deterministic idempotent upsert (returns 201,
+    # same row, period_end updated), NOT a 400/409.
     res_dup = await async_client.post(
         "/api/v1/cycles",
         headers=auth_headers,
         json={"period_start": str(start_1), "period_end": None},
     )
-    assert res_dup.status_code == 400
+    assert res_dup.status_code == 201
+    dup_data = res_dup.json()
+    assert dup_data["id"] == base_id
+    assert dup_data["period_start"] == str(start_1)
+    assert dup_data["period_end"] is None
+    # No duplicate row created.
+    list_res = await async_client.get("/api/v1/cycles", headers=auth_headers)
+    assert list_res.status_code == 200
+    assert len(list_res.json()) == 1
 
     # Period end prior to start
     res_end_before_start = await async_client.post(
@@ -173,6 +184,10 @@ async def test_future_period_not_reported_as_bleeding_today(async_client: AsyncC
 
 @pytest.mark.asyncio
 async def test_cycle_duplicate_period_start_rejected_with_409(async_client: AsyncClient, auth_headers: dict):
+    # NOTE: name retained for history; behavior is deterministic idempotent
+    # upsert (201, same row updated), NOT a 409/400 rejection. True 409s only
+    # occur on concurrent unique-constraint races (see IntegrityError handler
+    # in app/api/v1/cycles.py); sequential same-start POSTs upsert.
     p_date = date(2025, 1, 10)
     # 1. Create first period
     r1 = await async_client.post(
@@ -181,14 +196,23 @@ async def test_cycle_duplicate_period_start_rejected_with_409(async_client: Asyn
         json={"period_start": str(p_date), "period_end": str(p_date + timedelta(days=4))},
     )
     assert r1.status_code == 201
+    first_id = r1.json()["id"]
 
-    # 2. Attempt duplicate creation for same user on same period_start -> 409 Conflict
+    # 2. Repeat POST for same user on same period_start -> deterministic upsert 201
     r2 = await async_client.post(
         "/api/v1/cycles",
         headers=auth_headers,
         json={"period_start": str(p_date), "period_end": str(p_date + timedelta(days=5))},
     )
-    assert r2.status_code in (409, 400)  # DB unique constraint or overlap check rejected with conflict
+    assert r2.status_code == 201
+    second = r2.json()
+    assert second["id"] == first_id
+    assert second["period_start"] == str(p_date)
+    assert second["period_end"] == str(p_date + timedelta(days=5))
+    # No duplicate row created.
+    list_res = await async_client.get("/api/v1/cycles", headers=auth_headers)
+    assert list_res.status_code == 200
+    assert len(list_res.json()) == 1
 
 
 @pytest.mark.asyncio
