@@ -162,7 +162,7 @@ By domain (request/response shapes live in `app/schemas/`; exact contracts in Sw
 - Summaries: `GET /api/v1/summary/current`, `GET /api/v1/summary/history`
 - Devices: `GET` / `POST /api/v1/devices`, `DELETE /api/v1/devices/{id}`
 - Therapy: `POST /api/v1/therapy/recommend`, `GET` / `POST /api/v1/therapy/sessions`, `PATCH /api/v1/therapy/sessions/{id}`
-- Care: `POST /api/v1/care/interactions` (+ `/interact` alias)
+- Care: `POST /api/v1/care/interactions`
 - Root: `GET /`, `GET /health`
 
 ## Database

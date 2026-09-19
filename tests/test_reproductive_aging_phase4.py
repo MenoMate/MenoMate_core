@@ -552,7 +552,7 @@ async def test_aging_changes_preserve_all_history(
     log = await async_client.post(
         "/api/v1/logs",
         headers=auth_headers,
-        json={"log_date": str(t - timedelta(days=1)), "pain": 3, "mood": "neutral"},
+        json={"log_date": str(t - timedelta(days=1)), "pain": 3, "mood": ["neutral"]},
     )
     assert log.status_code in (200, 201), log.text
     preg = await async_client.put(PREGNANCY, headers=auth_headers, json={"is_active": True})

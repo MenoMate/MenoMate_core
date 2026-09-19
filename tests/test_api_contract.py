@@ -41,12 +41,17 @@ async def test_api_contract_all_routes_registered(async_client: AsyncClient):
         "/api/v1/health-context/conditions/{condition_id}": ["patch", "delete"],
         "/api/v1/health-context/medications": ["get", "post"],
         "/api/v1/health-context/medications/{medication_id}": ["patch", "delete"],
+        "/api/v1/reproductive/observations": ["get", "post"],
+        "/api/v1/reproductive/observations/{observation_id}": ["patch", "delete"],
+        "/api/v1/reproductive/estimates": ["get"],
+        "/api/v1/reproductive/pregnancy": ["get", "put", "patch", "delete"],
+        "/api/v1/reproductive/aging-context": ["get", "put"],
     }
 
     # Validate exact route and operation counts
-    assert len(expected_endpoints) == 23, f"Expected 23 unique API v1 paths, found {len(expected_endpoints)}"
+    assert len(expected_endpoints) == 28, f"Expected 28 unique API v1 paths, found {len(expected_endpoints)}"
     total_ops = sum(len(methods) for methods in expected_endpoints.values())
-    assert total_ops == 35, f"Expected 35 total API v1 operations, found {total_ops}"
+    assert total_ops == 46, f"Expected 46 total API v1 operations, found {total_ops}"
 
     for path, methods in expected_endpoints.items():
         assert path in paths, f"Endpoint {path} missing from API contract"
@@ -83,6 +88,17 @@ async def test_api_contract_401_on_all_protected_routes(async_client: AsyncClien
         ("POST", "/api/v1/therapy/sessions", {"started_at": "2026-08-01T10:00:00Z"}),
         ("PATCH", "/api/v1/therapy/sessions/1", {"pain_after": 2}),
         ("POST", "/api/v1/care/interactions", {"user_message": "hello"}),
+        ("GET", "/api/v1/reproductive/observations", None),
+        ("POST", "/api/v1/reproductive/observations", {"observation_date": "2026-08-01", "observation_type": "bbt", "bbt_celsius": 36.6}),
+        ("PATCH", "/api/v1/reproductive/observations/1", {"note": "x"}),
+        ("DELETE", "/api/v1/reproductive/observations/1", None),
+        ("GET", "/api/v1/reproductive/estimates", None),
+        ("GET", "/api/v1/reproductive/pregnancy", None),
+        ("PUT", "/api/v1/reproductive/pregnancy", {"is_active": True}),
+        ("PATCH", "/api/v1/reproductive/pregnancy", {"is_active": False}),
+        ("DELETE", "/api/v1/reproductive/pregnancy", None),
+        ("GET", "/api/v1/reproductive/aging-context", None),
+        ("PUT", "/api/v1/reproductive/aging-context", {"notes": "x"}),
         ("GET", "/api/v1/health-context", None),
         ("PUT", "/api/v1/health-context", {"pregnancy_context": "avoiding_pregnancy"}),
         ("PATCH", "/api/v1/health-context", {"health_notes": "hello"}),

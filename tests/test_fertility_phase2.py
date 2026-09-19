@@ -301,10 +301,10 @@ async def test_mucus_scale_independent_from_daily_log_discharge(
 ):
     day = _real_today() - timedelta(days=2)
     log = await async_client.post(
-        "/api/v1/logs", headers=auth_headers, json={"log_date": str(day), "pain": 1, "discharge": "heavy"}
+        "/api/v1/logs", headers=auth_headers, json={"log_date": str(day), "pain": 1, "discharge": "slippery"}
     )
     assert log.status_code == 200
-    assert log.json()["discharge"] == "heavy"
+    assert log.json()["discharge"] == "slippery"
     obs = await _post_obs(
         async_client, auth_headers,
         {"observation_date": str(day), "observation_type": "cervical_mucus", "mucus_category": "egg_white"},
@@ -313,7 +313,7 @@ async def test_mucus_scale_independent_from_daily_log_discharge(
     assert obs.json()["mucus_category"] == "egg_white"
     # Neither record disturbs the other.
     reread = await async_client.get(f"/api/v1/logs/{day}", headers=auth_headers)
-    assert reread.json()["discharge"] == "heavy"
+    assert reread.json()["discharge"] == "slippery"
 
 
 # --- B. Authorization -------------------------------------------------------
