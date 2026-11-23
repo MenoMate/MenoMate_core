@@ -206,5 +206,25 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
+# Agents & AI workspaces
 .agents/
 skills-lock.json
+
+# Scratch and local audit folders
+scratch/
+audit/
+AUDIT*/
+
+# OS files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# IDEs
+.idea/
+
+# Environment files and overrides
+.env.*
+*.env
+!.env.example
