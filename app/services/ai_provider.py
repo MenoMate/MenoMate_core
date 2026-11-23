@@ -183,7 +183,8 @@ class GroqAIProvider(BaseAIProvider):
         if self._client is not None:
             return self._client
         from groq import AsyncGroq
-        return AsyncGroq(api_key=self.api_key)
+        timeout_sec = getattr(settings, "GROQ_TIMEOUT_SECONDS", 10.0)
+        return AsyncGroq(api_key=self.api_key, timeout=timeout_sec)
 
     async def _fallback(
         self,

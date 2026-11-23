@@ -195,7 +195,7 @@ async def update_daily_log(
     # Use model_fields_set to distinguish between unspecified fields and explicitly supplied nulls
     fields_set = payload.model_fields_set
 
-    if "pain" in fields_set and payload.pain is not None:
+    if "pain" in fields_set:
         daily_log.pain = payload.pain
     if "mood" in fields_set:
         daily_log.mood = encode_moods(payload.mood)

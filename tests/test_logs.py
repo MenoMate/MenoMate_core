@@ -95,6 +95,15 @@ async def test_patch_log_clear_optional_field(async_client: AsyncClient, auth_he
     assert updated["mood"] is None
     assert updated["pain"] == 3  # Unaltered
 
+    # Explicitly clear pain by supplying null
+    patch_pain_res = await async_client.patch(
+        f"/api/v1/logs/{log_id}",
+        headers=auth_headers,
+        json={"pain": None},
+    )
+    assert patch_pain_res.status_code == 200
+    assert patch_pain_res.json()["pain"] is None
+
 
 @pytest.mark.asyncio
 async def test_log_validation_constraints(async_client: AsyncClient, auth_headers: dict):
