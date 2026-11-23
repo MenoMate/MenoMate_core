@@ -2,7 +2,7 @@ import uuid
 from collections import Counter
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
-from sqlalchemy import desc, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 

@@ -1,8 +1,8 @@
 import json
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field, field_validator
+from typing import Any, Dict, Optional
+from pydantic import BaseModel, field_validator
 
 from app.core.config import settings
 

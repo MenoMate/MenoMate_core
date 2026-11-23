@@ -16,7 +16,6 @@ from app.services.care_topics import (
     MOOD,
     SYMPTOM,
     THERAPY,
-    WELLNESS_GENERAL,
 )
 
 TIER_INFO = "info"
