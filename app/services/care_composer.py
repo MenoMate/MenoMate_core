@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 from app.services.care_topics import (
     LOG_LOOKUP,
     MOOD,
+    PATTERN_SUMMARY,
     SYMPTOM,
     THERAPY,
 )
@@ -226,11 +227,32 @@ def build_log_lookup_text(context: Dict[str, Any]) -> str:
     return "Here's what you logged — " + ". ".join(parts) + "."
 
 
+def _pattern_summary_facts(context: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "cycle_day": context.get("cycle_day"),
+        "phase": context.get("phase"),
+        "predicted_next_period": context.get("predicted_next_period"),
+        "prediction_confidence": context.get("prediction_confidence"),
+        "frequent_symptoms": _str_list(context.get("frequent_symptoms")),
+        "recent_pain_avg": context.get("recent_pain_avg"),
+        "pain_trend": context.get("pain_trend"),
+        "insights": context.get("insights") or [],
+        "memories": context.get("memories") or [],
+        "tracking_completeness": context.get("tracking_completeness") or {},
+        "has_history": bool(context.get("has_history")),
+    }
+
+
 def compose_ai_reply(
     topic: str, context: Dict[str, Any], message: Optional[str] = None
 ) -> ComposedReply:
     """Select facts and enhancement policy for AI-path topics."""
     mentioned = _mentioned_symptoms(message)
+    if topic == PATTERN_SUMMARY:
+        return ComposedReply(
+            topic=topic, facts=_pattern_summary_facts(context),
+            enhance=True, followup_allowed=True,
+        )
     if topic == SYMPTOM:
         facts = _symptom_facts(context)
         facts["mentioned"] = mentioned
@@ -390,6 +412,26 @@ def render_deterministic_reply(composed: ComposedReply) -> str:
 
     if composed.topic == LOG_LOOKUP and composed.base_text:
         return composed.base_text
+
+    if composed.topic == PATTERN_SUMMARY:
+        insights = facts.get("insights") or []
+        completeness = facts.get("tracking_completeness") or {}
+        logged_days = completeness.get("logged_days", 0)
+        if insights:
+            explanations = [
+                str(i.get("explanation") or "")
+                for i in insights[:3]
+                if isinstance(i, dict) and i.get("explanation")
+            ]
+            if explanations:
+                return " ".join(explanations)
+        notes = completeness.get("missing_data_notes") or []
+        note_str = f" {notes[0]}" if notes else ""
+        return (
+            f"Around {anchor}, there isn't enough logged history yet to identify "
+            f"reliable longitudinal patterns ({logged_days} logged days).{note_str} "
+            "Keep logging symptoms and cycles so I can summarize your personal trends."
+        )
 
     if composed.topic == SYMPTOM:
         recent = facts.get("recent_symptoms") or []

@@ -8,6 +8,7 @@ from sqlalchemy.types import Uuid
 from app.db.base import Base
 
 if TYPE_CHECKING:
+    from app.models.care_memory import CareMemory
     from app.models.cycle import Cycle
     from app.models.daily_log import DailyLog
     from app.models.device import Device
@@ -86,4 +87,7 @@ class Profile(Base):
         back_populates="user",
         cascade="all, delete-orphan",
         uselist=False,
+    )
+    care_memories: Mapped[List["CareMemory"]] = relationship(
+        "CareMemory", back_populates="user", cascade="all, delete-orphan"
     )

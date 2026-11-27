@@ -18,6 +18,7 @@ from app.services.care_topics import (
     LOG_LOOKUP,
     MOOD,
     OUT_OF_SCOPE,
+    PATTERN_SUMMARY,
     PREDICTION,
     CYCLE_STATUS,
     SYMPTOM,
@@ -394,6 +395,9 @@ async def handle_care_interaction(
         action_ids.append(ACTION_CONNECT_WEARABLE)
     if topic in (SYMPTOM, MOOD, LOG_LOOKUP) or advisory:
         action_ids.append(ACTION_OPEN_LOGGER)
+    if topic == PATTERN_SUMMARY:
+        action_ids.append(ACTION_OPEN_HISTORY)
+        action_ids.append(ACTION_OPEN_LOGGER)
     if topic == THERAPY and ACTION_OPEN_LOGGER not in action_ids:
         action_ids.append(ACTION_OPEN_LOGGER)
 
@@ -405,4 +409,5 @@ async def handle_care_interaction(
         "actions": _actions(*action_ids, labels=action_labels),
         "disclaimer": MEDICAL_DISCLAIMER,
         "therapy_profile": therapy_profile,
+        "insights": (context.get("insights") or [])[:3],
     }

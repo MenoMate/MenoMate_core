@@ -1,4 +1,5 @@
 from app.models.profile import Profile
+from app.models.care_memory import CareMemory
 from app.models.cycle import Cycle
 from app.models.daily_log import DailyLog
 from app.models.symptom_log import SymptomLog

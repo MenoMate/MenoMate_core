@@ -2,6 +2,8 @@ from enum import Enum
 from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
 
+from app.schemas.insights import InsightRecord
+
 
 class CareIntentEnum(str, Enum):
     cycle_insight = "cycle_insight"
@@ -67,3 +69,7 @@ class CareInteractionResponse(BaseModel):
     )
     disclaimer: str
     therapy_profile: Optional[str] = None
+    insights: List[InsightRecord] = Field(
+        default_factory=list,
+        description="Evidence-backed personal pattern insights relevant to the response.",
+    )

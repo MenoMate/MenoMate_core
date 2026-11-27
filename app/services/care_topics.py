@@ -17,6 +17,7 @@ PREDICTION = "prediction"
 SYMPTOM = "symptom"
 MOOD = "mood"
 LOG_LOOKUP = "log_lookup"
+PATTERN_SUMMARY = "pattern_summary"
 THERAPY = "therapy"
 DEVICE = "device"
 WELLNESS_GENERAL = "wellness_general"
@@ -28,6 +29,7 @@ CARE_TOPICS = (
     SYMPTOM,
     MOOD,
     LOG_LOOKUP,
+    PATTERN_SUMMARY,
     THERAPY,
     DEVICE,
     WELLNESS_GENERAL,
@@ -43,7 +45,7 @@ INTENT_TOPIC_HINT: Dict[str, Optional[str]] = {
     "symptom_insight": SYMPTOM,
     "wellness_help": None,
     "device_help": DEVICE,
-    "pattern_summary": SYMPTOM,
+    "pattern_summary": PATTERN_SUMMARY,
     "therapy_recommendation": THERAPY,
     "therapy": THERAPY,
     "feature_help": WELLNESS_GENERAL,
@@ -99,7 +101,11 @@ LOG_LOOKUP_PATTERNS = [
 ]
 
 THERAPY_PATTERNS = [
-    r"\bwhat setting\b",
+    r"\bwhat settings?\b",
+    r"\bsettings?\b.*\b(select|comfort\w*|help\w*|session\w*)\b",
+    r"\bcomfortable\b",
+    r"\bprevious sessions?\b",
+    r"\bfeeling better after\b",
     r"\bthermal\b",
     r"\brelief\b",
     r"\bwhat help\w*\b",
@@ -107,6 +113,18 @@ THERAPY_PATTERNS = [
     r"\b(cramps?|pain)\b.*\bhelps?\b",
     r"\bsooth\w*\b",
     r"\bwarmth\b",
+]
+
+PATTERN_PATTERNS = [
+    r"\bpatterns?\b",
+    r"\btrends?\b",
+    r"\bsummar\w*\b",
+    r"\bmost frequent\w*\b",
+    r"\btend to\b",
+    r"\bsame time in my cycles?\b",
+    r"\bcompared with previous cycles?\b",
+    r"\bprevious cycles?\b",
+    r"\bprepared for\b.*\bnext period\b",
 ]
 
 SYMPTOM_PATTERNS = [
@@ -242,6 +260,7 @@ def _matches(patterns: List[str], msg: str) -> bool:
 TOPIC_CONTEXT_INTENT = {
     SYMPTOM: "symptom_insight",
     MOOD: "symptom_insight",
+    PATTERN_SUMMARY: "pattern_summary",
     THERAPY: "pain_help",
     LOG_LOOKUP: "symptom_insight",
 }
@@ -273,14 +292,16 @@ def classify_care_topic(
         return OUT_OF_SCOPE
     if _matches(DEVICE_PATTERNS, msg):
         return DEVICE
+    if _matches(THERAPY_PATTERNS, msg):
+        return THERAPY
+    if _matches(PATTERN_PATTERNS, msg):
+        return PATTERN_SUMMARY
     if _matches(PREDICTION_PATTERNS, msg):
         return PREDICTION
     if _matches(CYCLE_STATUS_PATTERNS, msg):
         return CYCLE_STATUS
     if _matches(LOG_LOOKUP_PATTERNS, msg):
         return LOG_LOOKUP
-    if _matches(THERAPY_PATTERNS, msg):
-        return THERAPY
     if _matches(SYMPTOM_PATTERNS, msg):
         return SYMPTOM
     if _matches(MOOD_PATTERNS, msg):

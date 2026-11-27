@@ -35,6 +35,38 @@ async def build_care_context(
     # anchor here so "today" lookups agree with the served summary.
     today = await user_today_for(db, user_id)
 
+    # --- Longitudinal Pattern Summary Context ---
+    if intent == "pattern_summary":
+        from app.services.personal_context import build_personal_care_context
+
+        personal = await build_personal_care_context(
+            db, user_id, intent="pattern_summary", topic="pattern_summary"
+        )
+        return {
+            "intent": intent,
+            "cycle_day": personal.cycle.current_cycle_day,
+            "phase": personal.cycle.phase,
+            "is_bleeding": personal.cycle.is_bleeding,
+            "predicted_next_period": personal.cycle.predicted_next_period,
+            "prediction_confidence": personal.cycle.prediction_confidence,
+            "recent_cycle_lengths": personal.cycle.recent_cycle_lengths,
+            "usual_cycle_length": personal.cycle.usual_cycle_length,
+            "completed_cycle_count": personal.cycle.completed_cycle_count,
+            "incomplete_cycle_count": personal.cycle.incomplete_cycle_count,
+            "frequent_symptoms": personal.frequent_symptoms,
+            "recent_pain_avg": personal.recent_pain_avg,
+            "pain_trend": personal.pain_trend,
+            "insights": [i.model_dump() for i in personal.insights],
+            "memories": [m.model_dump() for m in personal.memories],
+            "tracking_completeness": personal.tracking_completeness.model_dump(),
+            "device_preference_summary": personal.device_preference_summary,
+            "recent_therapy_sessions": [
+                s.model_dump() for s in personal.recent_therapy_sessions
+            ],
+            "has_history": personal.has_history,
+            "history_note": personal.history_note,
+        }
+
     # --- Therapy / Pain Personalization Intent Context ---
     if intent in ("therapy", "pain_help", "therapy_recommendation"):
         # Fetch user sensitivity

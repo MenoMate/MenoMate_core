@@ -148,6 +148,15 @@ async def log_therapy_session(
         pain_before=payload.pain_before,
         pain_after=payload.pain_after,
         feedback=fb_val,
+        requested_heat_level=payload.requested_heat_level,
+        requested_duration_minutes=payload.requested_duration_minutes,
+        firmware_version=payload.firmware_version,
+        command_status=payload.command_status,
+        ack_status=payload.ack_status,
+        session_status=payload.session_status,
+        comfort_rating=payload.comfort_rating,
+        noticed_improvement=payload.noticed_improvement,
+        feedback_notes=payload.feedback_notes,
     )
     db.add(session)
 
@@ -213,6 +222,18 @@ async def update_therapy_session(
 
         if payload.pain_after is not None:
             session.pain_after = payload.pain_after
+        if payload.command_status is not None:
+            session.command_status = payload.command_status
+        if payload.ack_status is not None:
+            session.ack_status = payload.ack_status
+        if payload.session_status is not None:
+            session.session_status = payload.session_status
+        if payload.comfort_rating is not None:
+            session.comfort_rating = payload.comfort_rating
+        if payload.noticed_improvement is not None:
+            session.noticed_improvement = payload.noticed_improvement
+        if payload.feedback_notes is not None:
+            session.feedback_notes = payload.feedback_notes
 
         if payload.feedback is not None:
             fb_val = payload.feedback.value if hasattr(payload.feedback, "value") else str(payload.feedback)

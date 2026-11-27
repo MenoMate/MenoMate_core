@@ -45,6 +45,16 @@ class TherapySession(Base):
     pain_before: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     pain_after: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     feedback: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # Device session execution & lightweight post-session feedback fields
+    requested_heat_level: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    requested_duration_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    firmware_version: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    command_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    ack_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    session_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    comfort_rating: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    noticed_improvement: Mapped[Optional[bool]] = mapped_column(nullable=True)
+    feedback_notes: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

@@ -1,8 +1,16 @@
 from datetime import datetime, timezone
 from enum import Enum
 import uuid
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+CommandStatusType = Literal["selected", "sent", "acknowledged", "failed"]
+AckStatusType = Literal["pending", "acknowledged", "timeout", "not_supported"]
+SessionStatusType = Literal[
+    "selected", "sent", "acknowledged", "in_progress", "completed", "failed", "incomplete"
+]
+ComfortRatingType = Literal["comfortable", "too_strong", "too_weak"]
 
 
 class TherapyFeedbackEnum(str, Enum):
@@ -53,6 +61,15 @@ class TherapySessionCreate(BaseModel):
     pain_before: Optional[int] = Field(default=None, ge=0, le=10)
     pain_after: Optional[int] = Field(default=None, ge=0, le=10)
     feedback: Optional[TherapyFeedbackEnum] = None
+    requested_heat_level: Optional[int] = Field(default=None, ge=0, le=3)
+    requested_duration_minutes: Optional[int] = Field(default=None, ge=1, le=30)
+    firmware_version: Optional[str] = Field(default=None, max_length=32)
+    command_status: Optional[CommandStatusType] = None
+    ack_status: Optional[AckStatusType] = None
+    session_status: Optional[SessionStatusType] = None
+    comfort_rating: Optional[ComfortRatingType] = None
+    noticed_improvement: Optional[bool] = None
+    feedback_notes: Optional[str] = Field(default=None, max_length=256)
 
     @field_validator("started_at", "ended_at", mode="after")
     @classmethod
@@ -75,6 +92,12 @@ class TherapySessionUpdate(BaseModel):
     ended_at: Optional[datetime] = None
     pain_after: Optional[int] = Field(default=None, ge=0, le=10)
     feedback: Optional[TherapyFeedbackEnum] = None
+    command_status: Optional[CommandStatusType] = None
+    ack_status: Optional[AckStatusType] = None
+    session_status: Optional[SessionStatusType] = None
+    comfort_rating: Optional[ComfortRatingType] = None
+    noticed_improvement: Optional[bool] = None
+    feedback_notes: Optional[str] = Field(default=None, max_length=256)
 
     @field_validator("ended_at", mode="after")
     @classmethod
@@ -97,6 +120,15 @@ class TherapySessionResponse(BaseModel):
     pain_before: Optional[int] = None
     pain_after: Optional[int] = None
     feedback: Optional[str] = None
+    requested_heat_level: Optional[int] = None
+    requested_duration_minutes: Optional[int] = None
+    firmware_version: Optional[str] = None
+    command_status: Optional[str] = None
+    ack_status: Optional[str] = None
+    session_status: Optional[str] = None
+    comfort_rating: Optional[str] = None
+    noticed_improvement: Optional[bool] = None
+    feedback_notes: Optional[str] = None
     created_at: datetime
 
     @field_validator("started_at", "ended_at", "created_at", mode="after")
