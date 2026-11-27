@@ -85,6 +85,107 @@ TIER_INFO = "info"
 TIER_ADVISORY = "advisory"
 TIER_URGENT = "urgent"
 
+_CYCLE_CONTEXT_KEYS = {
+    "cycle_day",
+    "phase",
+    "is_bleeding",
+    "predicted_next_period",
+    "prediction_confidence",
+    "recent_cycle_lengths",
+    "usual_cycle_length",
+    "completed_cycle_count",
+    "incomplete_cycle_count",
+    "cycle_summary",
+    "cycle",
+    "average_cycle_length",
+}
+_DAILY_LOG_CONTEXT_KEYS = {
+    "frequent_symptoms",
+    "recent_pain_avg",
+    "pain_trend",
+    "recent_logs",
+    "today_pain",
+    "tracking_completeness",
+    "has_history",
+    "history_note",
+    "insights",
+    "logged_days",
+}
+_DEVICE_CONTEXT_KEYS = {
+    "recent_therapy_sessions",
+    "device_preference_summary",
+    "therapy_recommendation",
+    "sensitivity_index",
+    "sessions",
+}
+_MEMORY_CONTEXT_KEYS = {"memories"}
+_NEVER_SHARE_KEYS = {
+    "user_id",
+    "email",
+    "name",
+    "conditions",
+    "medications",
+    "health_conditions",
+    "health_notes",
+    "pregnant",
+    "trying_to_conceive",
+}
+
+
+def apply_care_consent_filter(
+    context: Dict[str, Any],
+    facts: Dict[str, Any],
+    *,
+    consent_granted: bool,
+    allowed_categories: Optional[List[str]] = None,
+    is_mock_provider: bool = False,
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    """Strip disallowed personal-history categories before calling an AI provider.
+
+    - Identifiers, conditions, medications, and dormant reproductive fields are
+      never forwarded.
+    - External (non-Mock) LLM providers never receive personal records unless
+      `consent_granted` is True.
+    - When `allowed_categories` is specified, only the selected categories
+      (`cycles`, `daily_logs`, `device_history`, `memories`) are retained.
+    """
+    filtered_ctx = {
+        k: v for k, v in context.items() if k not in _NEVER_SHARE_KEYS
+    }
+    filtered_facts = {
+        k: v for k, v in facts.items() if k not in _NEVER_SHARE_KEYS
+    }
+
+    if not consent_granted and not is_mock_provider:
+        minimal_ctx = {
+            k: filtered_ctx[k]
+            for k in ("intent", "topic", "recent_turns")
+            if k in filtered_ctx
+        }
+        minimal_ctx["consent_granted"] = False
+        return minimal_ctx, {"consent_granted": False}
+
+    if allowed_categories is not None:
+        allowed = set(allowed_categories)
+        blocked_keys: set[str] = set()
+        if "cycles" not in allowed:
+            blocked_keys |= _CYCLE_CONTEXT_KEYS
+        if "daily_logs" not in allowed:
+            blocked_keys |= _DAILY_LOG_CONTEXT_KEYS
+        if "device_history" not in allowed:
+            blocked_keys |= _DEVICE_CONTEXT_KEYS
+        if "memories" not in allowed:
+            blocked_keys |= _MEMORY_CONTEXT_KEYS
+
+        filtered_ctx = {
+            k: v for k, v in filtered_ctx.items() if k not in blocked_keys
+        }
+        filtered_facts = {
+            k: v for k, v in filtered_facts.items() if k not in blocked_keys
+        }
+
+    return filtered_ctx, filtered_facts
+
 
 def _actions(*ids: str, labels: Optional[Dict[str, str]] = None) -> List[Dict[str, str]]:
     """Build action objects, capped at 3. Per-call `labels` override the
@@ -123,6 +224,8 @@ async def handle_care_interaction(
     intent: Any,
     user_message: Optional[str] = None,
     recent_turns: Optional[List[Dict[str, Any]]] = None,
+    consent_granted: bool = False,
+    allowed_categories: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Care interaction router:
@@ -341,11 +444,19 @@ async def handle_care_interaction(
 
     provider = get_ai_provider()
 
+    llm_context, llm_facts = apply_care_consent_filter(
+        context,
+        composed.facts,
+        consent_granted=consent_granted,
+        allowed_categories=allowed_categories,
+        is_mock_provider=isinstance(provider, MockAIProvider),
+    )
+
     care_res = await provider.generate_care_response(
-        context=context,
+        context=llm_context,
         user_message=prompt_text,
         intent=intent_str,
-        facts=composed.facts,
+        facts=llm_facts,
         topic=topic,
         recent_turns=turns,
     )

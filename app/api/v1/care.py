@@ -38,6 +38,10 @@ async def care_interaction(
         intent=payload.intent,
         user_message=payload.user_message,
         recent_turns=[t.model_dump() for t in payload.recent_turns],
+        consent_granted=payload.consent_granted,
+        allowed_categories=list(payload.allowed_categories)
+        if payload.allowed_categories is not None
+        else None,
     )
     return CareInteractionResponse(**interaction_data)
 

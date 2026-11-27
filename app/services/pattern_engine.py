@@ -108,22 +108,37 @@ def analyze_user_patterns(
     window_logs = [l for l in logs if cutoff <= l.log_date <= today]
     pain_logs = [l for l in window_logs if l.pain is not None]
 
+    # Effective tracking window starts from the user's earliest observed
+    # cycle or log within [cutoff, today], never penalizing days before they
+    # started tracking.
+    candidate_starts = [c.period_start for c in cycles_asc if c.period_start >= cutoff]
+    candidate_starts.extend(l.log_date for l in window_logs)
+    if candidate_starts:
+        actual_start = min(candidate_starts)
+        effective_window_days = max(1, min(window_days, (today - actual_start).days + 1))
+    else:
+        effective_window_days = 0
+
     missing_notes: List[str] = []
     if len(window_logs) == 0:
         missing_notes.append(f"No daily logs recorded in the last {window_days} days.")
     elif len(window_logs) < MIN_LOGS_FOR_SYMPTOM_FREQUENCY:
         missing_notes.append(
-            f"Only {len(window_logs)} daily log(s) recorded in the last {window_days} days."
+            f"Only {len(window_logs)} daily log(s) recorded over {effective_window_days} active tracking day(s)."
         )
     if incomplete_cycles:
         missing_notes.append(
             f"{len(incomplete_cycles)} cycle(s) do not have a recorded end date and are treated as incomplete."
         )
 
-    coverage_ratio = round(len(window_logs) / max(window_days, 1), 2)
+    coverage_ratio = (
+        round(len(window_logs) / effective_window_days, 2)
+        if effective_window_days > 0
+        else 0.0
+    )
     completeness = TrackingCompleteness(
         logged_days=len(window_logs),
-        window_days=window_days,
+        window_days=effective_window_days,
         coverage_ratio=coverage_ratio,
         complete_cycles=len(complete_cycles),
         incomplete_cycles=len(incomplete_cycles),
@@ -194,10 +209,12 @@ def analyze_user_patterns(
             f"Need at least {MIN_LOGS_FOR_SYMPTOM_FREQUENCY} logged days to summarize symptom frequency."
         )
 
-    # 2. Cycle-day symptom clustering across observed cycles
+    # 2. Cycle-day symptom clustering across observed cycles WITH logs
+    # Denominator uses only cycles that have observable daily-log tracking
+    # so historical cycles without logs are never treated as negative observations.
     cycle_day_patterns: List[Dict[str, Any]] = []
     if len(cycles_asc) >= MIN_CYCLES_FOR_CYCLE_PATTERN:
-        # Map (symptom, bucket) -> set of cycle indices
+        tracked_cycle_indices: set[int] = set()
         bucket_cycles: Dict[Tuple[str, str], set[int]] = defaultdict(set)
         bucket_log_ids: Dict[Tuple[str, str], List[str]] = defaultdict(list)
         for l in logs:
@@ -205,25 +222,27 @@ def analyze_user_patterns(
             if mapped is None:
                 continue
             c_idx, c_day = mapped
+            tracked_cycle_indices.add(c_idx)
             bucket = _cycle_day_bucket(c_day)
             for s in l.symptoms or []:
                 bucket_cycles[(s.symptom_type, bucket)].add(c_idx)
                 bucket_log_ids[(s.symptom_type, bucket)].append(f"log:{l.id}")
 
+        tracked_c = len(tracked_cycle_indices)
         sorted_buckets = sorted(
             bucket_cycles.items(),
             key=lambda kv: len(kv[1]),
             reverse=True,
         )
         for (sym_type, bucket), c_indices in sorted_buckets[:3]:
-            if len(c_indices) >= MIN_OCCURRENCES_FOR_CYCLE_DAY_PATTERN:
-                total_c = len(cycles_asc)
+            if tracked_c >= MIN_CYCLES_FOR_CYCLE_PATTERN and len(c_indices) >= MIN_OCCURRENCES_FOR_CYCLE_DAY_PATTERN:
                 cycle_day_patterns.append(
                     {
                         "symptom": sym_type,
                         "cycle_day_window": bucket,
                         "cycles_with_symptom": len(c_indices),
-                        "observed_cycles": total_c,
+                        "tracked_cycles": tracked_c,
+                        "observed_cycles": len(cycles_asc),
                     }
                 )
                 insights.append(
@@ -233,17 +252,18 @@ def analyze_user_patterns(
                         title=f"{sym_type.capitalize()} around {bucket}",
                         explanation=(
                             f"{sym_type.capitalize()} was recorded during {bucket} in "
-                            f"{len(c_indices)} of your {total_c} observed cycles."
+                            f"{len(c_indices)} of your {tracked_c} tracked cycles."
                         ),
-                        time_period=f"{total_c} observed cycles",
+                        time_period=f"{tracked_c} tracked cycles",
                         supporting_counts={
                             "cycles_with_symptom": len(c_indices),
-                            "observed_cycles": total_c,
+                            "tracked_cycles": tracked_c,
+                            "observed_cycles": len(cycles_asc),
                         },
                         data_completeness=comp_dict,
                         confidence=_confidence_from_count(len(c_indices), high_at=4, mod_at=3),
                         source_record_ids=bucket_log_ids[(sym_type, bucket)][:10],
-                        caveat="Reflects logged observations only; unlogged cycles or days are excluded.",
+                        caveat="Denominator includes only cycles with logged days; untracked cycles are excluded.",
                     )
                 )
     else:

@@ -18,6 +18,9 @@ class CareIntentEnum(str, Enum):
     other = "other"
 
 
+CareDataCategory = Literal["cycles", "daily_logs", "device_history", "memories"]
+
+
 class CareRecentTurn(BaseModel):
     """One retained turn of the active Care session (Step 1).
 
@@ -45,6 +48,14 @@ class CareInteractionRequest(BaseModel):
     recent_turns: List[CareRecentTurn] = Field(
         default_factory=list,
         description="Transient active-session turns (most recent last). Never stored; forwarded to the provider as conversation context only.",
+    )
+    consent_granted: bool = Field(
+        default=False,
+        description="Explicit user consent to include personal health history in AI context.",
+    )
+    allowed_categories: Optional[List[CareDataCategory]] = Field(
+        default=None,
+        description="Optional subset of personal data categories permitted when consent_granted is true.",
     )
 
 
